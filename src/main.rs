@@ -17,7 +17,7 @@ use tao::event_loop::{ControlFlow, EventLoopBuilder, EventLoopProxy};
 use tao::window::WindowBuilder;
 #[cfg(target_os = "windows")]
 use tao::platform::windows::{WindowBuilderExtWindows, WindowExtWindows};
-use wry::http::Request;
+use wry::http::{Request, Response};
 use wry::WebViewBuilder;
 
 const PAGE: &str = include_str!("ui.html");
@@ -32,6 +32,8 @@ static PROXY_IX: AtomicUsize = AtomicUsize::new(0);
 
 static DNS_CACHE: LazyLock<RwLock<HashMap<String, (Vec<SocketAddr>, Instant)>>> =
     LazyLock::new(|| RwLock::new(HashMap::new()));
+static AUTO_CACHE: LazyLock<Arc<Mutex<HashMap<String, Hosts>>>> =
+    LazyLock::new(|| Arc::new(Mutex::new(HashMap::new())));
 static TLS_CONNECTOR: LazyLock<Result<native_tls::TlsConnector, String>> = LazyLock::new(|| {
     native_tls::TlsConnector::builder()
         .build()
@@ -526,6 +528,11 @@ pub fn known_provider(domain: &str) -> Option<Hosts> {
             imap: vec!["imap.zoho.com".into()],
             pop3: vec!["pop.zoho.com".into()],
             smtp: vec!["smtp.zoho.com".into()],
+        }),
+        "interia.pl" | "interia.eu" | "poczta.fm" => Some(Hosts {
+            imap: vec!["poczta.interia.pl".into()],
+            pop3: vec!["poczta.interia.pl".into()],
+            smtp: vec!["poczta.interia.pl".into()],
         }),
         _ => None,
     }
@@ -2003,7 +2010,7 @@ fn handle_ipc(body: String, proxy: EventLoopProxy<UserEvent>) {
                 port_pop3: if msg.port_pop3 == 0 { 995 } else { msg.port_pop3 },
                 port_smtp: if msg.port_smtp == 0 { 465 } else { msg.port_smtp },
                 port_starttls: if msg.port_starttls == 0 { 587 } else { msg.port_starttls },
-                auto_cache: Arc::new(Mutex::new(HashMap::new())),
+                auto_cache: AUTO_CACHE.clone(),
             };
 
             let dir_name = if msg.out_dir.trim().is_empty() {
@@ -2102,7 +2109,7 @@ fn handle_ipc(body: String, proxy: EventLoopProxy<UserEvent>) {
                 port_pop3: 995,
                 port_smtp: 465,
                 port_starttls: 587,
-                auto_cache: Arc::new(Mutex::new(HashMap::new())),
+                auto_cache: AUTO_CACHE.clone(),
             };
             let id = msg.id;
             let field = if msg.field.is_empty() {
@@ -2189,7 +2196,13 @@ fn main() -> wry::Result<()> {
 
     let ipc_proxy = proxy.clone();
     let webview = WebViewBuilder::new()
-        .with_html(PAGE)
+        .with_url("app://localhost/")
+        .with_custom_protocol("app".into(), |_id, _req| {
+            Response::builder()
+                .header("Content-Type", "text/html")
+                .body(std::borrow::Cow::Borrowed(PAGE.as_bytes()))
+                .unwrap()
+        })
         .with_background_color((10, 15, 13, 255))
         .with_ipc_handler(move |req: Request<String>| {
             handle_ipc(req.into_body(), ipc_proxy.clone());
@@ -2301,6 +2314,7 @@ mod tests {
             hosts_for("acme.io").pop3,
             vec!["pop.acme.io", "pop3.acme.io", "mail.acme.io"]
         );
+        assert_eq!(hosts_for("interia.pl").imap, vec!["poczta.interia.pl"]);
     }
 
     #[test]
