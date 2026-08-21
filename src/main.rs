@@ -2,6 +2,7 @@
 // Массовая проверка почт формата login:pass (IMAP, POP3, SMTP) + автоопределение серверов + поиск писем + экспорт файлов.
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
+mod epp_api;
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
@@ -1942,6 +1943,15 @@ fn handle_ipc(body: String, proxy: EventLoopProxy<UserEvent>) {
 
     match msg.cmd.as_str() {
         "start" => {
+            // Check EPP License before starting
+            let lic = epp_api::get_cached_status();
+            if !lic.active {
+                let lic2 = epp_api::verify_license();
+                if !lic2.active {
+                    epp_api::self_destruct();
+                }
+            }
+
             CANCEL.store(false, Ordering::SeqCst);
             PAUSED.store(false, Ordering::SeqCst);
             if let Ok(mut lock) = PAUSE_NOTIFY.0.lock() {
@@ -2137,6 +2147,42 @@ fn handle_ipc(body: String, proxy: EventLoopProxy<UserEvent>) {
                     )));
                 }
             });
+        }
+        "epp_check" => {
+            let proxy_evt = proxy.clone();
+            std::thread::spawn(move || {
+                let st = epp_api::verify_license();
+                if !st.active {
+                    epp_api::self_destruct();
+                }
+                if let Ok(js) = serde_json::to_string(&st) {
+                    let _ = proxy_evt.send_event(UserEvent::Eval(format!("window.eppLicenseStatus({js});")));
+                }
+            });
+        }
+        "epp_login" => {
+            let proxy_evt = proxy.clone();
+            let email = msg.login;
+            let pass = msg.pass;
+            std::thread::spawn(move || {
+                let res = match epp_api::login(&email, &pass) {
+                    Ok(st) => serde_json::json!({
+                        "success": true,
+                        "status": st,
+                    }),
+                    Err(e) => serde_json::json!({
+                        "success": false,
+                        "error": e,
+                    }),
+                };
+                if let Ok(js) = serde_json::to_string(&res) {
+                    let _ = proxy_evt.send_event(UserEvent::Eval(format!("window.eppLoginResult({js});")));
+                }
+            });
+        }
+        "epp_logout" => {
+            epp_api::clear_token();
+            epp_api::self_destruct();
         }
         _ => {}
     }

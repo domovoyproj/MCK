@@ -94,7 +94,35 @@
     font-size: 13px;
     font-weight: 500;
   }
-
+  .epp-license-badge {
+    font-size: 11.5px;
+    font-weight: 600;
+    padding: 3px 10px;
+    border-radius: 12px;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    transition: all 0.15s ease;
+  }
+  .epp-license-badge.active {
+    background: rgba(52, 211, 153, 0.12);
+    border: 1px solid rgba(52, 211, 153, 0.35);
+    color: #34D399;
+  }
+  .epp-license-badge.inactive {
+    background: rgba(239, 92, 92, 0.12);
+    border: 1px solid rgba(239, 92, 92, 0.35);
+    color: #EF5C5C;
+  }
+  .epp-license-badge.checking {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    color: #7A8582;
+  }
+  .epp-license-badge:hover {
+    filter: brightness(1.15);
+  }
   /* Основной контейнер */
   .app-container {
     display: flex;
@@ -1087,6 +1115,41 @@
     <div class="dot dot-green" id="btn-win-max"></div>
   </div>
   <div class="title-label">Mail Checker</div>
+  <div class="title-epp-wrap" style="margin-left: auto; display: flex; align-items: center; gap: 10px;">
+    <div class="epp-license-badge checking" id="epp-badge" title="Статус лицензии EPP" onclick="openEppModal()">● EPP: Проверка...</div>
+  </div>
+</div>
+
+<!-- Модальное окно авторизации EPP -->
+<div class="modal-backdrop" id="modal-epp-auth" style="display:none; z-index: 1000; position: fixed; top:0; left:0; right:0; bottom:0; background: rgba(0,0,0,0.7); backdrop-filter: blur(4px); align-items: center; justify-content: center;">
+  <div class="modal-card" style="width: 440px; text-align: left; padding: 28px; background: #12181A; border: 1px solid #252B2A; border-radius: 12px; box-shadow: 0 16px 40px rgba(0,0,0,0.8);">
+    <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px;">
+      <div style="display: flex; align-items: center; gap: 8px;">
+        <span style="font-size: 20px;">🛡️</span>
+        <h3 style="font-size: 17px; font-weight: 700; color: #E8EDEB;">Лицензия EPP Platform</h3>
+      </div>
+      <span class="modal-close" onclick="closeEppModal()" style="cursor: pointer; font-size: 18px; color: #7A8582;">✕</span>
+    </div>
+    <p style="font-size: 13px; color: #7A8582; line-height: 1.45; margin-bottom: 18px;">
+      Для работы Mail Checker требуется активная подписка на платформе <b>domovoy1337.online</b>. Войдите в свой аккаунт для привязки лицензии к вашему устройству.
+    </p>
+    <div id="epp-auth-err" style="display:none; color: #EF5C5C; background: rgba(239,92,92,0.1); border: 1px solid rgba(239,92,92,0.3); border-radius: 6px; padding: 10px 12px; font-size: 12.5px; margin-bottom: 14px;"></div>
+    <div id="epp-auth-info" style="display:none; color: #34D399; background: rgba(52,211,153,0.1); border: 1px solid rgba(52,211,153,0.3); border-radius: 6px; padding: 10px 12px; font-size: 12.5px; margin-bottom: 14px;"></div>
+    <div style="display: flex; flex-direction: column; gap: 12px; margin-bottom: 18px;">
+      <div>
+        <label style="font-size: 11px; font-weight: 700; text-transform: uppercase; color: #7A8582; display: block; margin-bottom: 4px;">Email аккаунта</label>
+        <input type="text" id="inp-epp-email" placeholder="user@example.com" style="width: 100%; background: #0A0F0D; border: 1px solid #252B2A; border-radius: 6px; padding: 9px 12px; color: #E8EDEB; font-size: 13px;">
+      </div>
+      <div>
+        <label style="font-size: 11px; font-weight: 700; text-transform: uppercase; color: #7A8582; display: block; margin-bottom: 4px;">Пароль</label>
+        <input type="password" id="inp-epp-pass" placeholder="Пароль от сайта" style="width: 100%; background: #0A0F0D; border: 1px solid #252B2A; border-radius: 6px; padding: 9px 12px; color: #E8EDEB; font-size: 13px;">
+      </div>
+    </div>
+    <div style="display: flex; gap: 10px; align-items: center; justify-content: flex-end;">
+      <button onclick="checkEppLicense()" style="background: transparent; border: 1px solid #252B2A; color: #7A8582; padding: 8px 14px; border-radius: 6px; cursor: pointer; font-size: 12.5px;">Перепроверить</button>
+      <button id="btn-epp-login" onclick="submitEppLogin()" style="background: linear-gradient(135deg, #34D399, #3BAE7A); color: #0A0F0D; font-weight: 700; padding: 8px 18px; border-radius: 6px; cursor: pointer; font-size: 13px;">Активировать →</button>
+    </div>
+  </div>
 </div>
 
 <!-- Основной контейнер -->
@@ -1913,11 +1976,14 @@
   });
 
   btnStart.addEventListener('click', () => {
+    if (!gEppStatus.active) {
+      openEppModal();
+      return;
+    }
     if (!credsRaw.trim()) {
       alert("Пожалуйста, выберите файл с аккаунтами (Учётки)!");
       return;
     }
-
     // Reset counters & rows
     resetStats();
     allRows = [];
@@ -2418,6 +2484,109 @@
       pillsContainer.innerHTML = pillsHtml;
     }
   }
+
+  // --- EPP Platform License Integration ---
+  let gEppStatus = { active: false, email: '', error: null };
+
+  function updateEppBadge(st) {
+    gEppStatus = st;
+    const badge = document.getElementById('epp-badge');
+    if (!badge) return;
+    badge.className = 'epp-license-badge ' + (st.active ? 'active' : (st.error ? 'inactive' : 'checking'));
+    if (st.active) {
+      badge.textContent = '● EPP: Активна (' + (st.email || 'Лицензия') + ')';
+      badge.title = 'Подписка EPP подтверждена. Нажмите для сведений.';
+    } else {
+      badge.textContent = '● EPP: Не активна';
+      badge.title = st.error || 'Лицензия не активна. Нажмите для входа.';
+    }
+  }
+
+  window.eppLicenseStatus = function(st) {
+    updateEppBadge(st);
+    if (!st.active && st.error) {
+      const errBox = document.getElementById('epp-auth-err');
+      if (errBox) {
+        errBox.textContent = st.error;
+        errBox.style.display = 'block';
+      }
+    }
+  };
+
+  window.eppLicenseError = function(msg) {
+    openEppModal();
+    const errBox = document.getElementById('epp-auth-err');
+    if (errBox) {
+      errBox.textContent = msg;
+      errBox.style.display = 'block';
+    }
+  };
+
+  window.eppLoginResult = function(res) {
+    const btn = document.getElementById('btn-epp-login');
+    if (btn) btn.textContent = 'Активировать →';
+    if (res.success && res.status) {
+      updateEppBadge(res.status);
+      const infoBox = document.getElementById('epp-auth-info');
+      if (infoBox) {
+        infoBox.textContent = 'Лицензия успешно активирована!';
+        infoBox.style.display = 'block';
+      }
+      setTimeout(() => { closeEppModal(); }, 1200);
+    } else {
+      const errBox = document.getElementById('epp-auth-err');
+      if (errBox) {
+        errBox.textContent = res.error || 'Ошибка активации.';
+        errBox.style.display = 'block';
+      }
+    }
+  };
+
+  function openEppModal() {
+    const m = document.getElementById('modal-epp-auth');
+    if (m) m.style.display = 'flex';
+    if (gEppStatus.error) {
+      const errBox = document.getElementById('epp-auth-err');
+      if (errBox) {
+        errBox.textContent = gEppStatus.error;
+        errBox.style.display = 'block';
+      }
+    }
+  }
+
+  function closeEppModal() {
+    const m = document.getElementById('modal-epp-auth');
+    if (m) m.style.display = 'none';
+  }
+
+  function checkEppLicense() {
+    const badge = document.getElementById('epp-badge');
+    if (badge) badge.textContent = '● EPP: Проверка...';
+    sendIPC({ cmd: 'epp_check' });
+  }
+
+  function submitEppLogin() {
+    const email = document.getElementById('inp-epp-email').value;
+    const pass = document.getElementById('inp-epp-pass').value;
+    if (!email || !pass) {
+      const errBox = document.getElementById('epp-auth-err');
+      if (errBox) {
+        errBox.textContent = 'Введите email и пароль';
+        errBox.style.display = 'block';
+      }
+      return;
+    }
+    const btn = document.getElementById('btn-epp-login');
+    if (btn) btn.textContent = 'Проверка...';
+    const errBox = document.getElementById('epp-auth-err');
+    if (errBox) errBox.style.display = 'none';
+    sendIPC({ cmd: 'epp_login', login: email, pass: pass });
+  }
+
+  // Request initial license check on load
+  setTimeout(() => {
+    checkEppLicense();
+  }, 100);
 </script>
 </body>
 </html>
