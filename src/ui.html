@@ -1,0 +1,2105 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mail Checker</title>
+<style>
+  :root {
+    --bg: #0A0F0D;
+    --titlebar: #1A1F1E;
+    --panel: #12181A;
+    --panel2: #0F1513;
+    --stroke: #252B2A;
+    --stroke2: rgba(255, 255, 255, 0.05);
+    --txt: #E8EDEB;
+    --muted: #7A8582;
+    --green: #34D399;
+    --green2: #3DDC91;
+    --btn-start: linear-gradient(135deg, #34D399, #3BAE7A);
+    --red: #EF5C5C;
+    --warn: #E0B84A;
+    --blue: #4A9EDB;
+    --purple: #A78BFA;
+    --badge: #1E2523;
+    --font: "Segoe UI Variable", "Segoe UI", Inter, system-ui, sans-serif;
+    --mono: "Cascadia Code", Consolas, "Courier New", monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; border: none; outline: none; }
+  html, body {
+    height: 100%;
+    width: 100%;
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+    background: var(--bg);
+    color: var(--txt);
+    font-family: var(--font);
+    font-size: 13px;
+    -webkit-user-select: none;
+    user-select: none;
+    border: none;
+    outline: none;
+    display: flex;
+    flex-direction: column;
+  }
+  /* Тёмные тонкие скроллбары для всех элементов */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--stroke);
+    border-radius: 4px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.2);
+  }
+  ::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+  /* Титлбар */
+  .titlebar {
+    height: 38px;
+    background: var(--titlebar);
+    border-bottom: 1px solid var(--stroke);
+    display: flex;
+    align-items: center;
+    padding: 0 14px;
+    gap: 16px;
+    cursor: default;
+  }
+  .traffic-lights {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+  }
+  .dot {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    cursor: pointer;
+    transition: opacity 0.15s;
+  }
+  .dot:hover { opacity: 0.8; }
+  .dot-red { background: #FF5F57; }
+  .dot-yellow { background: #FEBC2E; }
+.dot-green { background: #28C840; opacity: 0.35; cursor: default; }
+.dot-green:hover { opacity: 0.35; }
+  .title-label {
+    color: var(--muted);
+    font-size: 13px;
+    font-weight: 500;
+  }
+
+  /* Основной контейнер */
+  .app-container {
+    display: flex;
+    flex: 1;
+    min-height: 0;
+    background:
+      radial-gradient(1000px 420px at 50% -12%, rgba(52, 211, 153, 0.16), transparent 60%),
+      var(--bg);
+    overflow: hidden;
+  }
+
+  /* Колонка 1: Иконочный рельс */
+  .rail {
+    width: 50px;
+    background: var(--panel2);
+    border-right: 1px solid var(--stroke);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 14px 0;
+    gap: 16px;
+    flex-shrink: 0;
+    z-index: 10;
+  }
+  .rail-icon {
+    width: 36px;
+    height: 36px;
+    display: grid;
+    place-items: center;
+    border-radius: 8px;
+    color: var(--muted);
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+  }
+  .rail-icon:hover {
+    color: var(--txt);
+    background: rgba(255, 255, 255, 0.05);
+  }
+  .rail-icon.active {
+    background: rgba(52, 211, 153, 0.12);
+    color: var(--green);
+  }
+  .rail-icon svg { width: 20px; height: 20px; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+
+  /* Область отображения табов */
+  .tab-content {
+    flex: 1;
+    display: none;
+    height: 100%;
+    overflow: hidden;
+  }
+  .tab-content.active {
+    display: flex;
+  }
+
+  /* ========== ТАБ 1: CHECKER ========== */
+  /* Колонка 2: Левый сайдбар */
+  .sidebar {
+    width: 220px;
+    background: var(--panel);
+    border-right: 1px solid var(--stroke);
+    display: flex;
+    flex-direction: column;
+    padding: 14px;
+    gap: 14px;
+    overflow-y: auto;
+    flex-shrink: 0;
+  }
+  .sidebar::-webkit-scrollbar { width: 4px; }
+  .sidebar::-webkit-scrollbar-thumb { background: var(--stroke); border-radius: 4px; }
+
+  .sec-title {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    color: var(--muted);
+    margin-bottom: 6px;
+    font-weight: 600;
+  }
+
+  /* Кнопки файлов */
+  .file-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid var(--stroke);
+    border-radius: 8px;
+    padding: 7px 10px;
+    cursor: pointer;
+    transition: border-color 0.15s, background 0.15s;
+    margin-bottom: 6px;
+  }
+  .file-row:hover {
+    background: rgba(255, 255, 255, 0.06);
+    border-color: var(--green);
+  }
+  .file-row-name { font-size: 12px; font-weight: 500; }
+  .file-badge {
+    background: rgba(52, 211, 153, 0.15);
+    color: var(--green);
+    border-radius: 999px;
+    padding: 1px 7px;
+    font-size: 11px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Действия (Старт/Стоп) */
+  .btn-start {
+    width: 100%;
+    padding: 9px 0;
+    border: none;
+    border-radius: 8px;
+    background: var(--btn-start);
+    color: #0A0F0D;
+    font-weight: 700;
+    font-size: 13px;
+    cursor: pointer;
+    box-shadow: 0 4px 14px rgba(52, 211, 153, 0.25);
+    transition: filter 0.15s, transform 0.05s;
+  }
+  .btn-start:hover { filter: brightness(1.08); }
+  .btn-start:active { transform: translateY(1px); }
+  .btn-stop {
+    width: 100%;
+    padding: 9px 0;
+    border: none;
+    border-radius: 8px;
+    background: var(--red);
+    color: #fff;
+    font-weight: 700;
+    font-size: 13px;
+    cursor: pointer;
+    box-shadow: 0 4px 14px rgba(239, 92, 92, 0.25);
+    display: none;
+  }
+  .status-line {
+    font-size: 11px;
+    color: var(--muted);
+    margin-top: 4px;
+    text-align: center;
+  }
+  .outdir-note {
+    font-size: 10px;
+    color: var(--muted);
+    word-break: break-all;
+    margin-top: 2px;
+    text-align: center;
+  }
+
+  /* Степперы настроек */
+  .stepper-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 6px;
+  }
+  .stepper-label { font-size: 12px; color: var(--txt); }
+  .stepper-ctrl {
+    display: flex;
+    align-items: center;
+    border: 1px solid var(--stroke);
+    border-radius: 6px;
+    background: rgba(0, 0, 0, 0.25);
+    overflow: hidden;
+  }
+  .stepper-btn {
+    width: 22px;
+    height: 22px;
+    background: transparent;
+    border: none;
+    color: var(--muted);
+    cursor: pointer;
+    font-weight: 600;
+    display: grid;
+    place-items: center;
+  }
+  .stepper-btn:hover { color: var(--txt); background: rgba(255, 255, 255, 0.05); }
+  .stepper-val {
+    width: 36px;
+    text-align: center;
+    border: none;
+    background: transparent;
+    color: var(--txt);
+    font-size: 11.5px;
+    font-weight: 600;
+    font-family: var(--font);
+    outline: none;
+    -webkit-user-select: text;
+    user-select: text;
+  }
+
+  /* Поле ввода */
+  .input-box {
+    width: 100%;
+    padding: 6px 9px;
+    background: rgba(0, 0, 0, 0.28);
+    border: 1px solid var(--stroke);
+    border-radius: 7px;
+    color: var(--txt);
+    font-size: 12px;
+    font-family: var(--font);
+    outline: none;
+    margin-bottom: 6px;
+    -webkit-user-select: text;
+    user-select: text;
+  }
+  .input-box:focus { border-color: var(--green); }
+
+  /* КАСТОМНЫЕ DROPDOWN-МЕНЮ */
+  .custom-select {
+    position: relative;
+    width: 100%;
+    margin-bottom: 6px;
+    font-size: 12px;
+    font-family: var(--font);
+    outline: none;
+  }
+  .cs-trigger {
+    width: 100%;
+    padding: 6px 10px;
+    background: rgba(0, 0, 0, 0.28);
+    border: 1px solid var(--stroke);
+    border-radius: 7px;
+    color: var(--txt);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    cursor: pointer;
+    transition: border-color 0.15s;
+  }
+  .custom-select:focus .cs-trigger,
+  .custom-select.open .cs-trigger {
+    border-color: var(--green);
+  }
+  .cs-arrow {
+    width: 12px;
+    height: 12px;
+    stroke: var(--muted);
+    fill: none;
+    stroke-width: 2;
+    transition: transform 0.15s ease;
+  }
+  .custom-select.open .cs-arrow {
+    transform: rotate(180deg);
+  }
+  .cs-options {
+    position: absolute;
+    top: calc(100% + 4px);
+    left: 0;
+    right: 0;
+    background: var(--panel);
+    border: 1px solid var(--stroke);
+    border-radius: 8px;
+    padding: 4px;
+    z-index: 100;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
+    display: none;
+    flex-direction: column;
+    gap: 2px;
+    max-height: 200px;
+    overflow-y: auto;
+  }
+  .cs-options::-webkit-scrollbar { width: 4px; }
+  .cs-options::-webkit-scrollbar-thumb { background: var(--stroke); border-radius: 4px; }
+  .custom-select.open .cs-options {
+    display: flex;
+  }
+  .cs-option {
+    padding: 6px 10px;
+    border-radius: 5px;
+    color: var(--txt);
+    cursor: pointer;
+    transition: background 0.1s, color 0.1s;
+    font-size: 12px;
+  }
+  .cs-option:hover {
+    background: rgba(52, 211, 153, 0.12);
+    color: var(--green);
+  }
+  .cs-option.selected {
+    background: rgba(52, 211, 153, 0.2);
+    color: var(--green);
+    font-weight: 600;
+  }
+
+  /* Чекбоксы протоколов */
+  .proto-row {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    margin-bottom: 4px;
+    font-size: 12px;
+    cursor: pointer;
+  }
+  .proto-row input[type="checkbox"] {
+    accent-color: var(--green);
+    cursor: pointer;
+  }
+
+  /* Тумблеры */
+  .switch-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 6px;
+    font-size: 12px;
+  }
+  .switch {
+    position: relative;
+    display: inline-block;
+    width: 32px;
+    height: 18px;
+  }
+  .switch input { opacity: 0; width: 0; height: 0; }
+  .slider {
+    position: absolute;
+    cursor: pointer;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: #202725;
+    border: 1px solid var(--stroke);
+    border-radius: 18px;
+    transition: 0.2s;
+  }
+  .slider:before {
+    position: absolute;
+    content: "";
+    height: 12px; width: 12px;
+    left: 2px; bottom: 2px;
+    background: var(--muted);
+    border-radius: 50%;
+    transition: 0.2s;
+  }
+  .switch input:checked + .slider { background: rgba(52, 211, 153, 0.3); border-color: var(--green); }
+  .switch input:checked + .slider:before { transform: translateX(14px); background: var(--green); }
+
+  /* Колонка 3: Центральный список результатов */
+  .main-list {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-width: 540px;
+    background: transparent;
+  }
+  .list-toolbar {
+    height: 48px;
+    border-bottom: 1px solid var(--stroke);
+    display: flex;
+    align-items: center;
+    padding: 0 16px;
+    gap: 10px;
+  }
+  .search-wrap {
+    flex: 1;
+    position: relative;
+    display: flex;
+    align-items: center;
+  }
+  .search-wrap svg {
+    position: absolute;
+    left: 10px;
+    width: 14px;
+    height: 14px;
+    stroke: var(--muted);
+    fill: none;
+    stroke-width: 2;
+  }
+  .search-input {
+    width: 100%;
+    padding: 6px 10px 6px 32px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid var(--stroke);
+    border-radius: 7px;
+    color: var(--txt);
+    font-size: 12.5px;
+    outline: none;
+    -webkit-user-select: text;
+    user-select: text;
+  }
+  .search-input:focus { border-color: var(--green); }
+  .btn-reset-filter {
+    padding: 6px 8px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid var(--stroke);
+    border-radius: 7px;
+    color: var(--muted);
+    cursor: pointer;
+    display: grid;
+    place-items: center;
+  }
+  .btn-reset-filter:hover { color: var(--txt); border-color: var(--green); }
+  .btn-reset-filter svg { width: 14px; height: 14px; stroke: currentColor; fill: none; stroke-width: 2; }
+
+  /* Таблица результатов */
+  .rows-container {
+    flex: 1;
+    overflow-y: auto;
+    padding: 8px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .rows-container::-webkit-scrollbar { width: 6px; }
+  .rows-container::-webkit-scrollbar-thumb { background: var(--stroke); border-radius: 4px; }
+
+  .row-card {
+    display: flex;
+    align-items: center;
+    background: rgba(18, 24, 26, 0.6);
+    border: 1px solid var(--stroke2);
+    border-radius: 8px;
+    padding: 8px 12px;
+    gap: 10px;
+    font-size: 13px;
+    animation: fadeIn 0.15s ease;
+  }
+  .row-card.hidden { display: none !important; }
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
+
+  .status-dot {
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+  .dot-success { background: var(--green); box-shadow: 0 0 8px rgba(52, 211, 153, 0.4); }
+  .dot-invalid { background: var(--red); }
+  .dot-twofa { background: var(--warn); }
+  .dot-locked { background: var(--warn); }
+  .dot-ratelimited { background: var(--warn); }
+  .dot-captcha { background: var(--warn); }
+  .dot-timeout { background: #9E9E9E; }
+  .dot-connection { background: #9E9E9E; }
+  .dot-tls { background: var(--red); }
+  .dot-servernf { background: #9E9E9E; }
+  .dot-proxy { background: #FF9800; }
+  .dot-protocol { background: #9E9E9E; }
+
+  .row-email {
+    font-family: var(--mono);
+    font-size: 12.5px;
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    -webkit-user-select: text;
+    user-select: text;
+  }
+  .proto-badge {
+    background: var(--badge);
+    border: 1px solid var(--stroke);
+    border-radius: 6px;
+    padding: 2px 7px;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--txt);
+    flex-shrink: 0;
+  }
+  .auto-badge {
+    background: rgba(167, 139, 250, 0.12);
+    border: 1px solid rgba(167, 139, 250, 0.4);
+    border-radius: 5px;
+    padding: 1px 6px;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    color: var(--purple);
+    flex-shrink: 0;
+  }
+  .country-pill {
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 999px;
+    padding: 1px 6px;
+    font-size: 10.5px;
+    font-weight: 600;
+    color: var(--muted);
+    flex-shrink: 0;
+  }
+  .row-count {
+    font-size: 12px;
+    color: var(--muted);
+    font-variant-numeric: tabular-nums;
+    width: 36px;
+    text-align: right;
+    flex-shrink: 0;
+  }
+  .btn-open-box {
+    background: transparent;
+    border: none;
+    color: var(--muted);
+    cursor: pointer;
+    width: 24px;
+    height: 24px;
+    display: grid;
+    place-items: center;
+    border-radius: 4px;
+    transition: color 0.15s, background 0.15s;
+    flex-shrink: 0;
+  }
+  .btn-open-box:hover {
+    color: var(--green);
+    background: rgba(52, 211, 153, 0.12);
+  }
+  .btn-open-box svg { width: 15px; height: 15px; stroke: currentColor; fill: none; stroke-width: 2; }
+  .btn-placeholder { width: 24px; height: 24px; flex-shrink: 0; }
+
+  /* Колонка 4: Правая панель (Статистика) */
+  .stats-panel {
+    width: 220px;
+    background: var(--panel);
+    border-left: 1px solid var(--stroke);
+    display: flex;
+    flex-direction: column;
+    padding: 14px;
+    gap: 16px;
+    overflow-y: auto;
+    flex-shrink: 0;
+  }
+  .stats-panel::-webkit-scrollbar { width: 4px; }
+  .stats-panel::-webkit-scrollbar-thumb { background: var(--stroke); border-radius: 4px; }
+
+  /* Progress bar */
+  .prog-wrap {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .prog-bar-bg {
+    height: 6px;
+    background: rgba(255, 255, 255, 0.06);
+    border-radius: 999px;
+    overflow: hidden;
+  }
+  .prog-bar-fill {
+    height: 100%;
+    width: 0%;
+    background: var(--green);
+    border-radius: 999px;
+    transition: width 0.15s ease;
+  }
+  .prog-numbers {
+    display: flex;
+    justify-content: space-between;
+    font-size: 11px;
+    color: var(--muted);
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Статистические списки */
+  .stat-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .stat-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 12px;
+  }
+  .stat-label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .stat-val {
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+  }
+  .val-success { color: var(--green); }
+  .val-auto { color: var(--purple); }
+  .val-found { color: var(--green); }
+  .val-corp { color: var(--blue); }
+  .val-invalid { color: var(--red); }
+  .val-warn { color: var(--warn); }
+  .val-muted { color: var(--muted); }
+
+  .view-errors-link {
+    font-size: 11px;
+    color: var(--muted);
+    text-decoration: underline;
+    cursor: pointer;
+    margin-top: 4px;
+    display: inline-block;
+  }
+  .view-errors-link:hover { color: var(--txt); }
+
+  /* ========== ТАБ 2: MESSAGES / INBOX EXPLORER ========== */
+  .inbox-view {
+    flex: 1;
+    display: flex;
+    background: var(--bg);
+    overflow: hidden;
+  }
+  .inbox-sidebar {
+    width: 280px;
+    background: var(--panel);
+    border-right: 1px solid var(--stroke);
+    display: flex;
+    flex-direction: column;
+    padding: 14px;
+    gap: 10px;
+  }
+  .inbox-accounts-list {
+    flex: 1;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .inbox-acct-item {
+    padding: 8px 10px;
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid var(--stroke);
+    border-radius: 7px;
+    cursor: pointer;
+    transition: background 0.12s, border-color 0.12s;
+  }
+  .inbox-acct-item:hover {
+    background: rgba(255, 255, 255, 0.05);
+    border-color: var(--green);
+  }
+  .inbox-acct-item.active {
+    background: rgba(52, 211, 153, 0.12);
+    border-color: var(--green);
+  }
+  .inbox-acct-mail {
+    font-family: var(--mono);
+    font-size: 12px;
+    font-weight: 600;
+  }
+  .inbox-acct-meta {
+    font-size: 11px;
+    color: var(--muted);
+    margin-top: 3px;
+    display: flex;
+    justify-content: space-between;
+  }
+  .inbox-main-pane {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+  }
+  .inbox-toolbar {
+    height: 48px;
+    border-bottom: 1px solid var(--stroke);
+    display: flex;
+    align-items: center;
+    padding: 0 16px;
+    gap: 10px;
+    background: var(--panel2);
+  }
+  .inbox-letters-list {
+    flex: 1;
+    overflow-y: auto;
+    padding: 14px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  /* ========== ТАБ 3: STATS & ANALYTICS ========== */
+  .stats-view {
+    flex: 1;
+    padding: 24px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+  }
+  .stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 16px;
+  }
+  .stat-card {
+    background: var(--panel);
+    border: 1px solid var(--stroke);
+    border-radius: 12px;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .stat-card-title {
+    font-size: 12px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+  }
+  .stat-card-val {
+    font-size: 26px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+  }
+  .stat-card-sub {
+    font-size: 11.5px;
+    color: var(--muted);
+  }
+
+  /* ========== ТАБ 4: SETTINGS ========== */
+  .settings-view {
+    flex: 1;
+    width: 100%;
+    height: 100%;
+    padding: 24px 32px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+  }
+  .settings-view::-webkit-scrollbar { width: 6px; }
+  .settings-view::-webkit-scrollbar-thumb { background: var(--stroke); border-radius: 4px; }
+  .settings-section {
+    background: var(--panel);
+    border: 1px solid var(--stroke);
+    border-radius: 12px;
+    padding: 18px 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    max-width: 760px;
+    width: 100%;
+  }
+  .settings-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 20px;
+  }
+  .settings-info h4 { font-size: 13px; font-weight: 600; }
+  .settings-info p { font-size: 11.5px; color: var(--muted); margin-top: 2px; }
+
+  /* Модальный оверлей просмотра писем */
+  .modal-overlay {
+    position: fixed;
+    top: 38px; left: 0; right: 0; bottom: 0;
+    background: rgba(0, 0, 0, 0.65);
+    backdrop-filter: blur(5px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 100;
+    animation: fadeIn 0.15s ease;
+  }
+  .modal-overlay.hidden { display: none; }
+  .modal-card {
+    width: 680px;
+    max-width: 90%;
+    max-height: 80%;
+    background: var(--panel);
+    border: 1px solid var(--stroke);
+    border-radius: 12px;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.5);
+    overflow: hidden;
+  }
+  .modal-header {
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--stroke);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: var(--panel2);
+  }
+  .modal-email-title {
+    font-family: var(--mono);
+    font-size: 13.5px;
+    color: var(--green);
+    font-weight: 600;
+  }
+  .modal-close-btn {
+    background: transparent;
+    border: none;
+    color: var(--muted);
+    font-size: 16px;
+    cursor: pointer;
+    padding: 2px 6px;
+    border-radius: 4px;
+  }
+  .modal-close-btn:hover { color: var(--txt); background: rgba(255, 255, 255, 0.08); }
+
+  .modal-search-bar {
+    padding: 10px 16px;
+    display: flex;
+    gap: 8px;
+    border-bottom: 1px solid var(--stroke);
+    background: rgba(0, 0, 0, 0.2);
+  }
+  .modal-search-btn {
+    padding: 6px 14px;
+    background: var(--btn-start);
+    border: none;
+    border-radius: 6px;
+    color: #0A0F0D;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .modal-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 12px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-height: 240px;
+  }
+  .modal-letter {
+    display: flex;
+    flex-direction: column;
+    padding: 8px 10px;
+    border: 1px solid var(--stroke2);
+    background: rgba(255, 255, 255, 0.02);
+    border-radius: 6px;
+    gap: 3px;
+  }
+  .modal-letter.unseen .m-subj { font-weight: 700; color: #fff; }
+  .m-top { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); }
+  .m-from { color: var(--green); font-weight: 500; }
+  .m-subj { font-size: 12.5px; color: var(--txt); }
+
+  .spinner {
+    width: 24px;
+    height: 24px;
+    border: 3px solid rgba(52, 211, 153, 0.2);
+    border-top-color: var(--green);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+    margin: 40px auto;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .modal-msg { text-align: center; color: var(--muted); margin: 30px 0; font-size: 12.5px; }
+  .modal-err { text-align: center; color: var(--red); margin: 30px 0; font-size: 12.5px; }
+</style>
+</head>
+<body>
+
+<!-- Титлбар -->
+<div class="titlebar" id="titlebar">
+  <div class="traffic-lights">
+    <div class="dot dot-red" id="btn-win-close" title="Закрыть"></div>
+    <div class="dot dot-yellow" id="btn-win-min" title="Свернуть"></div>
+    <div class="dot dot-green" id="btn-win-max"></div>
+  </div>
+  <div class="title-label">Mail Checker</div>
+</div>
+
+<!-- Основной контейнер -->
+<div class="app-container">
+
+  <!-- 1. Иконочный рельс (переключение табов) -->
+  <div class="rail">
+    <div class="rail-icon active" id="tab-btn-checker" title="Чекер">
+      <svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>
+    </div>
+    <div class="rail-icon" id="tab-btn-messages" title="Сообщения / Инбокс">
+      <svg viewBox="0 0 24 24"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path><polyline points="22,6 12,13 2,6"></polyline></svg>
+    </div>
+    <div class="rail-icon" id="tab-btn-stats" title="Аналитика и статистика">
+      <svg viewBox="0 0 24 24"><line x1="18" y1="20" x2="18" y2="10"></line><line x1="12" y1="20" x2="12" y2="4"></line><line x1="6" y1="20" x2="6" y2="14"></line></svg>
+    </div>
+    <div class="rail-icon" id="tab-btn-settings" title="Настройки">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+    </div>
+  </div>
+
+  <!-- TAB 1: CHECKER (Основной экран) -->
+  <div class="tab-content active" id="view-checker">
+    <!-- Левый сайдбар -->
+    <div class="sidebar">
+      <!-- Файлы -->
+      <div>
+        <div class="sec-title">Файлы</div>
+        <input type="file" id="file-creds" accept=".txt,text/plain" style="display:none;">
+        <div class="file-row" id="btn-load-creds">
+          <span class="file-row-name">Учётки (login:pass)</span>
+          <span class="file-badge" id="badge-creds">0</span>
+        </div>
+        <input type="file" id="file-proxies" accept=".txt,text/plain" style="display:none;">
+        <div class="file-row" id="btn-load-proxies">
+          <span class="file-row-name">Прокси</span>
+          <span class="file-badge" id="badge-proxies">0</span>
+        </div>
+      </div>
+
+      <!-- Действия -->
+      <div>
+        <div class="sec-title">Действия</div>
+        <button class="btn-start" id="btn-start">Старт</button>
+        <button class="btn-stop" id="btn-stop">Стоп</button>
+        <div class="status-line" id="status-text">Статус: Остановлен</div>
+        <div class="outdir-note" id="outdir-note"></div>
+      </div>
+
+      <!-- Настройки -->
+      <div>
+        <div class="sec-title">Настройки</div>
+        <div class="stepper-row">
+          <span class="stepper-label">Потоки</span>
+          <div class="stepper-ctrl">
+            <button class="stepper-btn" onclick="stepVal('inp-threads', -10, 1, 500)">−</button>
+            <input class="stepper-val" id="inp-threads" type="text" value="200">
+            <button class="stepper-btn" onclick="stepVal('inp-threads', 10, 1, 500)">+</button>
+          </div>
+        </div>
+        <div class="stepper-row">
+          <span class="stepper-label">Таймаут (сек)</span>
+          <div class="stepper-ctrl">
+            <button class="stepper-btn" onclick="stepVal('inp-timeout', -1, 1, 120)">−</button>
+            <input class="stepper-val" id="inp-timeout" type="text" value="10">
+            <button class="stepper-btn" onclick="stepVal('inp-timeout', 1, 1, 120)">+</button>
+          </div>
+        </div>
+        <div class="stepper-row">
+          <span class="stepper-label">Повторы</span>
+          <div class="stepper-ctrl">
+            <button class="stepper-btn" onclick="stepVal('inp-retries', -1, 0, 10)">−</button>
+            <input class="stepper-val" id="inp-retries" type="text" value="3">
+            <button class="stepper-btn" onclick="stepVal('inp-retries', 1, 0, 10)">+</button>
+          </div>
+        </div>
+        <div class="switch-row" style="margin-top: 8px;">
+          <span class="stepper-label">Автопоиск IMAP</span>
+          <label class="switch">
+            <input type="checkbox" id="chk-use-auto" checked>
+            <span class="slider"></span>
+          </label>
+        </div>
+      </div>
+
+      <!-- Поиск писем -->
+      <div>
+        <div class="sec-title">Поиск писем</div>
+        <div class="custom-select" id="cs-search-field" tabindex="0">
+          <div class="cs-trigger">
+            <span class="cs-label">Тема (SUBJECT)</span>
+            <svg class="cs-arrow" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg>
+          </div>
+          <div class="cs-options">
+            <div class="cs-option selected" data-val="SUBJECT">Тема (SUBJECT)</div>
+            <div class="cs-option" data-val="FROM">От кого (FROM)</div>
+            <div class="cs-option" data-val="TEXT">Текст (TEXT)</div>
+            <div class="cs-option" data-val="BODY">Тело (BODY)</div>
+          </div>
+          <input type="hidden" id="search-field" value="SUBJECT">
+        </div>
+        <input class="input-box" id="search-term" type="text" placeholder="письмо для поиска (опц.)">
+      </div>
+
+      <!-- Протоколы -->
+      <div>
+        <div class="sec-title">Протоколы</div>
+        <label class="proto-row"><input type="checkbox" id="proto-imap" checked> IMAP</label>
+        <label class="proto-row"><input type="checkbox" id="proto-pop3" checked> POP3</label>
+        <label class="proto-row"><input type="checkbox" id="proto-smtp" checked> SMTP</label>
+      </div>
+
+      <!-- Прокси -->
+      <div>
+        <div class="sec-title">Прокси</div>
+        <div class="switch-row">
+          <span>С прокси</span>
+          <label class="switch">
+            <input type="checkbox" id="chk-use-proxies">
+            <span class="slider"></span>
+          </label>
+        </div>
+        <div class="custom-select" id="cs-proxy-type" tabindex="0">
+          <div class="cs-trigger">
+            <span class="cs-label">SOCKS5</span>
+            <svg class="cs-arrow" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg>
+          </div>
+          <div class="cs-options">
+            <div class="cs-option selected" data-val="socks5">SOCKS5</div>
+            <div class="cs-option" data-val="socks4">SOCKS4</div>
+            <div class="cs-option" data-val="http">HTTP</div>
+            <div class="cs-option" data-val="https">HTTPS</div>
+          </div>
+          <input type="hidden" id="proxy-type" value="socks5">
+        </div>
+      </div>
+    </div>
+
+    <!-- Центральный список -->
+    <div class="main-list">
+      <div class="list-toolbar">
+        <div class="search-wrap">
+          <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+          <input class="search-input" id="filter-text" type="text" placeholder="Поиск по email...">
+        </div>
+        <div class="custom-select" id="cs-filter-category" tabindex="0" style="width: 170px; margin: 0;">
+          <div class="cs-trigger">
+            <span class="cs-label">Все результаты</span>
+            <svg class="cs-arrow" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg>
+          </div>
+          <div class="cs-options">
+            <div class="cs-option selected" data-val="all">Все результаты</div>
+            <div class="cs-option" data-val="auto">Автоопределено</div>
+            <div class="cs-option" data-val="success">Успешно</div>
+            <div class="cs-option" data-val="found">Письмо найдено</div>
+            <div class="cs-option" data-val="corporate">Корпоративные</div>
+            <div class="cs-option" data-val="invalid">Невалид</div>
+            <div class="cs-option" data-val="twofa">2FA</div>
+            <div class="cs-option" data-val="locked">Заблокирован</div>
+            <div class="cs-option" data-val="errors">Ошибки</div>
+          </div>
+          <input type="hidden" id="filter-category" value="all">
+        </div>
+        <button class="btn-reset-filter" id="btn-reset-filter" title="Сбросить фильтры">
+          <svg viewBox="0 0 24 24"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon></svg>
+        </button>
+      </div>
+
+      <div class="rows-container" id="rows-container">
+        <!-- Динамические строки добавляются через window.pushRow -->
+      </div>
+    </div>
+
+    <!-- Правая панель (Статистика) -->
+    <div class="stats-panel">
+      <!-- Прогресс -->
+      <div>
+        <div class="sec-title">Прогресс</div>
+        <div class="prog-wrap">
+          <div class="prog-bar-bg">
+            <div class="prog-bar-fill" id="prog-fill"></div>
+          </div>
+          <div class="prog-numbers">
+            <span id="prog-counts">0 / 0</span>
+            <span id="prog-percent">0%</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Результаты -->
+      <div>
+        <div class="sec-title">Результаты</div>
+        <div class="stat-list">
+          <div class="stat-item"><span class="stat-label">Успешно</span><span class="stat-val val-success" id="c-success">0</span></div>
+          <div class="stat-item"><span class="stat-label">Автоопределено</span><span class="stat-val val-auto" id="c-auto">0</span></div>
+          <div class="stat-item"><span class="stat-label">Письмо найдено</span><span class="stat-val val-found" id="c-found">0</span></div>
+          <div class="stat-item"><span class="stat-label">Корпоративные</span><span class="stat-val val-corp" id="c-corporate">0</span></div>
+          <div class="stat-item"><span class="stat-label">Невалид</span><span class="stat-val val-invalid" id="c-invalid">0</span></div>
+          <div class="stat-item"><span class="stat-label">2FA / 2-Этапная</span><span class="stat-val val-warn" id="c-twofa">0</span></div>
+          <div class="stat-item"><span class="stat-label">Заблокирован</span><span class="stat-val val-warn" id="c-locked">0</span></div>
+          <div class="stat-item"><span class="stat-label">Лимит запросов</span><span class="stat-val val-warn" id="c-ratelimited">0</span></div>
+          <div class="stat-item"><span class="stat-label">Капча</span><span class="stat-val val-warn" id="c-captcha">0</span></div>
+        </div>
+      </div>
+
+      <!-- Ошибки -->
+      <div>
+        <div class="sec-title">Ошибки</div>
+        <div class="stat-list">
+          <div class="stat-item"><span class="stat-label">Таймаут</span><span class="stat-val val-muted" id="c-timeout">0</span></div>
+          <div class="stat-item"><span class="stat-label">Соединение</span><span class="stat-val val-muted" id="c-connection">0</span></div>
+          <div class="stat-item"><span class="stat-label">Ошибка TLS</span><span class="stat-val val-muted" id="c-tls">0</span></div>
+          <div class="stat-item"><span class="stat-label">Сервер не найден</span><span class="stat-val val-muted" id="c-servernf">0</span></div>
+          <div class="stat-item"><span class="stat-label">Прокси</span><span class="stat-val val-muted" id="c-proxy">0</span></div>
+          <div class="stat-item"><span class="stat-label">Протокол</span><span class="stat-val val-muted" id="c-protocol">0</span></div>
+        </div>
+        <a class="view-errors-link" id="link-view-errors">Подробнее об ошибках...</a>
+      </div>
+    </div>
+  </div>
+
+  <!-- TAB 2: INBOX EXPLORER (Просмотрщик ящиков) -->
+  <div class="tab-content" id="view-messages">
+    <div class="inbox-view">
+      <div class="inbox-sidebar">
+        <div class="sec-title">Валидные ящики</div>
+        <div class="inbox-accounts-list" id="inbox-accts">
+          <div style="color:var(--muted); font-size:12px; text-align:center; padding:30px 10px;">
+            Нет проверенных валидных аккаунтов. Запустите проверку во вкладке Чекер.
+          </div>
+        </div>
+      </div>
+      <div class="inbox-main-pane">
+        <div class="inbox-toolbar">
+          <div style="font-weight:600; font-family:var(--mono); color:var(--green); min-width:180px;" id="inbox-active-email">—</div>
+          <div class="custom-select" id="cs-inbox-field" tabindex="0" style="width:130px; margin:0;">
+            <div class="cs-trigger">
+              <span class="cs-label">Тема</span>
+              <svg class="cs-arrow" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg>
+            </div>
+            <div class="cs-options">
+              <div class="cs-option selected" data-val="SUBJECT">Тема</div>
+              <div class="cs-option" data-val="FROM">От кого</div>
+              <div class="cs-option" data-val="TEXT">Текст</div>
+              <div class="cs-option" data-val="BODY">Тело</div>
+            </div>
+            <input type="hidden" id="inbox-field" value="SUBJECT">
+          </div>
+          <input class="input-box" id="inbox-term" type="text" placeholder="Поиск писем в этом ящике..." style="margin:0; flex:1;">
+          <button class="modal-search-btn" id="inbox-btn-search">Искать</button>
+        </div>
+        <div class="inbox-letters-list" id="inbox-letters-container">
+          <div style="color:var(--muted); text-align:center; padding:60px 0;">Выберите аккаунт слева для загрузки писем.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- TAB 3: STATS & ANALYTICS -->
+  <div class="tab-content" id="view-stats">
+    <div class="stats-view">
+      <h2 style="font-size:18px; font-weight:700;">Аналитика и статистика</h2>
+      <div class="stats-grid">
+        <div class="stat-card">
+          <div class="stat-card-title">Процент успеха</div>
+          <div class="stat-card-val val-success" id="stat-rate">0%</div>
+          <div class="stat-card-sub" id="stat-rate-sub">0 валидных / 0 всего</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-card-title">Автоопределено</div>
+          <div class="stat-card-val val-auto" id="stat-auto-cnt">0</div>
+          <div class="stat-card-sub">серверов через автопоиск</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-card-title">Найдено писем</div>
+          <div class="stat-card-val val-found" id="stat-found">0</div>
+          <div class="stat-card-sub">совпадений по запросу</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-card-title">Корпоративные ящики</div>
+          <div class="stat-card-val val-corp" id="stat-corp">0</div>
+          <div class="stat-card-sub">непубличные домены</div>
+        </div>
+      </div>
+
+      <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 10px;">
+        <div class="stat-card">
+          <div class="stat-card-title">Распределение по протоколам</div>
+          <div style="display:flex; flex-direction:column; gap:10px; margin-top:12px;" id="stat-proto-list">
+            <div style="display:flex; justify-content:space-between; font-size:12px;"><span>IMAP</span><b id="proto-cnt-imap">0</b></div>
+            <div style="display:flex; justify-content:space-between; font-size:12px;"><span>POP3</span><b id="proto-cnt-pop3">0</b></div>
+            <div style="display:flex; justify-content:space-between; font-size:12px;"><span>SMTP</span><b id="proto-cnt-smtp">0</b></div>
+          </div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-card-title">География (страны)</div>
+          <div style="display:flex; flex-wrap:wrap; gap:8px; margin-top:12px;" id="stat-country-pills">
+            <div style="color:var(--muted); font-size:12px;">Пока нет данных.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- TAB 4: SETTINGS -->
+  <div class="tab-content" id="view-settings">
+    <div class="settings-view">
+      <h2 style="font-size:18px; font-weight:700;">Настройки приложения</h2>
+
+      <!-- Секция Автопоиска -->
+      <div class="settings-section">
+        <h3 style="font-size:14px; font-weight:600;">Автоопределение и поиск серверов</h3>
+        <div class="settings-row">
+          <div class="settings-info">
+            <h4>Автопоиск серверов IMAP/POP3/SMTP</h4>
+            <p>Поиск через базу автоконфигураций и эвристики формирования хостов</p>
+          </div>
+          <label class="switch">
+            <input type="checkbox" id="chk-settings-auto" checked>
+            <span class="slider"></span>
+          </label>
+        </div>
+        <div class="settings-row">
+          <div class="settings-info">
+            <h4>Динамическое кэширование базы</h4>
+            <p>Сохранять найденные рабочие серверы в память для мгновенного чека других ящиков этого же домена</p>
+          </div>
+          <label class="switch">
+            <input type="checkbox" id="chk-settings-auto-learn" checked>
+            <span class="slider"></span>
+          </label>
+        </div>
+        <div class="settings-row">
+          <div class="settings-info">
+            <h4>Таймаут запроса автопоиска</h4>
+            <p>Лимит ожидания ответа от базы автоконфигураций</p>
+          </div>
+          <div class="stepper-ctrl">
+            <button class="stepper-btn" onclick="stepVal('inp-auto-timeout', -200, 500, 5000)">−</button>
+            <input class="stepper-val" id="inp-auto-timeout" type="text" value="1600" style="width:48px;">
+            <button class="stepper-btn" onclick="stepVal('inp-auto-timeout', 200, 500, 5000)">+</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Сетевые параметры -->
+      <div class="settings-section">
+        <h3 style="font-size:14px; font-weight:600;">Сетевые параметры и порты</h3>
+        <div class="settings-row">
+          <div class="settings-info">
+            <h4>Порт IMAP (SSL)</h4>
+            <p>Стандартный порт SSL/TLS для прямого подключения к IMAP</p>
+          </div>
+          <input class="input-box" id="inp-port-imap" style="width:90px; text-align:center; margin:0;" type="text" value="993">
+        </div>
+        <div class="settings-row">
+          <div class="settings-info">
+            <h4>Порт POP3 (SSL)</h4>
+            <p>Стандартный порт SSL/TLS для прямого подключения к POP3</p>
+          </div>
+          <input class="input-box" id="inp-port-pop3" style="width:90px; text-align:center; margin:0;" type="text" value="995">
+        </div>
+        <div class="settings-row">
+          <div class="settings-info">
+            <h4>Порт SMTP (SSL)</h4>
+            <p>Порт Implicit SSL (465) для отправки</p>
+          </div>
+          <input class="input-box" id="inp-port-smtp" style="width:90px; text-align:center; margin:0;" type="text" value="465">
+        </div>
+        <div class="settings-row">
+          <div class="settings-info">
+            <h4>Порт SMTP (STARTTLS)</h4>
+            <p>Порт явного STARTTLS (587) при недоступности 465</p>
+          </div>
+          <input class="input-box" id="inp-port-starttls" style="width:90px; text-align:center; margin:0;" type="text" value="587">
+        </div>
+      </div>
+
+      <!-- Экспорт и результаты -->
+      <div class="settings-section">
+        <h3 style="font-size:14px; font-weight:600;">Экспорт и результаты</h3>
+        <div class="settings-row">
+          <div class="settings-info">
+            <h4>Папка для сохранения</h4>
+            <p>Имя каталога рядом с приложением для сохранения текстовых файлов</p>
+          </div>
+          <input class="input-box" id="setting-out-dir" style="width:140px; margin:0;" type="text" value="results">
+        </div>
+        <div class="settings-row">
+          <div class="settings-info">
+            <h4>Формат строк в файлах</h4>
+            <p>Формат экспорта учетных записей в текстовые файлы</p>
+          </div>
+          <input class="input-box" id="setting-export-fmt" style="width:140px; margin:0;" type="text" value="login:pass" readonly>
+        </div>
+      </div>
+    </div>
+
+</div>
+
+<!-- Модальный оверлей быстрого просмотра ящика -->
+<div class="modal-overlay hidden" id="modal-overlay">
+  <div class="modal-card">
+    <div class="modal-header">
+      <div class="modal-email-title" id="modal-email">user@domain.com</div>
+      <button class="modal-close-btn" id="modal-close">✕</button>
+    </div>
+    <div class="modal-search-bar">
+      <div class="custom-select" id="cs-modal-field" tabindex="0" style="width:140px; margin:0;">
+        <div class="cs-trigger">
+          <span class="cs-label">Тема</span>
+          <svg class="cs-arrow" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg>
+        </div>
+        <div class="cs-options">
+          <div class="cs-option selected" data-val="SUBJECT">Тема</div>
+          <div class="cs-option" data-val="FROM">От кого</div>
+          <div class="cs-option" data-val="TEXT">Текст</div>
+          <div class="cs-option" data-val="BODY">Тело</div>
+        </div>
+        <input type="hidden" id="modal-field" value="SUBJECT">
+      </div>
+      <input class="input-box" id="modal-term" type="text" placeholder="Поиск в письмах..." style="margin:0; flex:1;">
+      <button class="modal-search-btn" id="modal-btn-search">Искать</button>
+    </div>
+    <div class="modal-body" id="modal-content">
+      <div class="spinner"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+  let credsRaw = "";
+  let proxiesRaw = "";
+  let credsMap = new Map(); // login -> pass
+  let allRows = []; // { id, elem, login, category, found, corporate, protocol, country, auto }
+  let successAccounts = []; // array of { id, login, count, protocol }
+  let activeModalAcct = null; // { id, login, pass }
+  let activeInboxAcct = null; // { id, login, pass }
+  const countryCounts = new Map();
+
+  // IPC
+  function sendIPC(obj) {
+    if (window.ipc && window.ipc.postMessage) {
+      window.ipc.postMessage(JSON.stringify(obj));
+    }
+  }
+
+  // Window Controls
+  document.getElementById('btn-win-close').addEventListener('click', (e) => {
+    e.stopPropagation();
+    sendIPC({ cmd: 'win', action: 'close' });
+  });
+  document.getElementById('btn-win-min').addEventListener('click', (e) => {
+    e.stopPropagation();
+    sendIPC({ cmd: 'win', action: 'min' });
+  });
+  document.getElementById('btn-win-max').addEventListener('click', (e) => {
+    e.stopPropagation();
+  });
+  document.getElementById('titlebar').addEventListener('mousedown', (e) => {
+    if (e.target.closest('.dot')) return;
+    sendIPC({ cmd: 'win', action: 'drag' });
+  });
+
+  // Tab Navigation (Rail Icons)
+  const tabDefs = [
+    { btnId: 'tab-btn-checker', viewId: 'view-checker' },
+    { btnId: 'tab-btn-messages', viewId: 'view-messages' },
+    { btnId: 'tab-btn-stats', viewId: 'view-stats' },
+    { btnId: 'tab-btn-settings', viewId: 'view-settings' }
+  ];
+
+  tabDefs.forEach(({ btnId, viewId }) => {
+    const btn = document.getElementById(btnId);
+    if (!btn) return;
+    btn.addEventListener('click', () => {
+      tabDefs.forEach(t => {
+        document.getElementById(t.btnId)?.classList.remove('active');
+        document.getElementById(t.viewId)?.classList.remove('active');
+      });
+      btn.classList.add('active');
+      document.getElementById(viewId)?.classList.add('active');
+      if (viewId === 'view-stats') {
+        updateAnalyticsView();
+      }
+    });
+  });
+
+  // Steppers
+  // Configuration Persistence
+  const SETTINGS_KEY = 'mailcheck_settings_v1';
+
+  function saveSettings() {
+    try {
+      const cfg = {
+        threads: document.getElementById('inp-threads')?.value || '200',
+        timeout: document.getElementById('inp-timeout')?.value || '10',
+        retries: document.getElementById('inp-retries')?.value || '3',
+        useAuto: document.getElementById('chk-use-auto')?.checked ?? true,
+        autoLearn: document.getElementById('chk-settings-auto-learn')?.checked ?? true,
+        autoTimeout: document.getElementById('inp-auto-timeout')?.value || '1600',
+        protoImap: document.getElementById('proto-imap')?.checked ?? true,
+        protoPop3: document.getElementById('proto-pop3')?.checked ?? true,
+        protoSmtp: document.getElementById('proto-smtp')?.checked ?? true,
+        useProxies: document.getElementById('chk-use-proxies')?.checked ?? false,
+        proxyType: document.getElementById('proxy-type')?.value || 'socks5',
+        searchField: document.getElementById('search-field')?.value || 'SUBJECT',
+        portImap: document.getElementById('inp-port-imap')?.value || '993',
+        portPop3: document.getElementById('inp-port-pop3')?.value || '995',
+        portSmtp: document.getElementById('inp-port-smtp')?.value || '465',
+        portStarttls: document.getElementById('inp-port-starttls')?.value || '587',
+        outDir: document.getElementById('setting-out-dir')?.value || 'results'
+      };
+      localStorage.setItem(SETTINGS_KEY, JSON.stringify(cfg));
+    } catch (e) {
+      console.warn("Could not save settings:", e);
+    }
+  }
+
+  function setCustomSelectValue(containerId, value) {
+    const cs = document.getElementById(containerId);
+    if (!cs) return;
+    const hiddenInp = cs.querySelector('input[type="hidden"]');
+    const label = cs.querySelector('.cs-label');
+    const options = cs.querySelectorAll('.cs-option');
+    options.forEach(o => {
+      const isMatch = o.getAttribute('data-val') === value;
+      o.classList.toggle('selected', isMatch);
+      if (isMatch) {
+        label.textContent = o.textContent;
+        if (hiddenInp) hiddenInp.value = value;
+      }
+    });
+  }
+
+  function loadSettings() {
+    try {
+      const raw = localStorage.getItem(SETTINGS_KEY);
+      if (!raw) return;
+      const cfg = JSON.parse(raw);
+
+      if (cfg.threads && document.getElementById('inp-threads')) document.getElementById('inp-threads').value = cfg.threads;
+      if (cfg.timeout && document.getElementById('inp-timeout')) document.getElementById('inp-timeout').value = cfg.timeout;
+      if (cfg.retries && document.getElementById('inp-retries')) document.getElementById('inp-retries').value = cfg.retries;
+
+      if (cfg.useAuto !== undefined) {
+        const chk1 = document.getElementById('chk-use-auto');
+        const chk2 = document.getElementById('chk-settings-auto');
+        if (chk1) chk1.checked = cfg.useAuto;
+        if (chk2) chk2.checked = cfg.useAuto;
+      }
+      if (cfg.autoLearn !== undefined && document.getElementById('chk-settings-auto-learn')) {
+        document.getElementById('chk-settings-auto-learn').checked = cfg.autoLearn;
+      }
+      if (cfg.autoTimeout && document.getElementById('inp-auto-timeout')) {
+        document.getElementById('inp-auto-timeout').value = cfg.autoTimeout;
+      }
+
+      if (cfg.protoImap !== undefined && document.getElementById('proto-imap')) document.getElementById('proto-imap').checked = cfg.protoImap;
+      if (cfg.protoPop3 !== undefined && document.getElementById('proto-pop3')) document.getElementById('proto-pop3').checked = cfg.protoPop3;
+      if (cfg.protoSmtp !== undefined && document.getElementById('proto-smtp')) document.getElementById('proto-smtp').checked = cfg.protoSmtp;
+
+      if (cfg.useProxies !== undefined && document.getElementById('chk-use-proxies')) document.getElementById('chk-use-proxies').checked = cfg.useProxies;
+      if (cfg.proxyType) setCustomSelectValue('cs-proxy-type', cfg.proxyType);
+      if (cfg.searchField) setCustomSelectValue('cs-search-field', cfg.searchField);
+
+      if (cfg.portImap && document.getElementById('inp-port-imap')) document.getElementById('inp-port-imap').value = cfg.portImap;
+      if (cfg.portPop3 && document.getElementById('inp-port-pop3')) document.getElementById('inp-port-pop3').value = cfg.portPop3;
+      if (cfg.portSmtp && document.getElementById('inp-port-smtp')) document.getElementById('inp-port-smtp').value = cfg.portSmtp;
+      if (cfg.portStarttls && document.getElementById('inp-port-starttls')) document.getElementById('inp-port-starttls').value = cfg.portStarttls;
+      if (cfg.outDir && document.getElementById('setting-out-dir')) document.getElementById('setting-out-dir').value = cfg.outDir;
+    } catch (e) {
+      console.warn("Could not load settings:", e);
+    }
+  }
+
+  // Steppers
+  window.stepVal = function(id, delta, min, max) {
+    const inp = document.getElementById(id);
+    let val = parseInt(inp.value, 10) || min;
+    val = Math.min(Math.max(val + delta, min), max);
+    inp.value = val;
+    saveSettings();
+  };
+
+  // Custom Select Engine
+  function initCustomSelect(containerId, onSelectCallback) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+    const trigger = container.querySelector('.cs-trigger');
+    const label = container.querySelector('.cs-label');
+    const hiddenInp = container.querySelector('input[type="hidden"]');
+    const options = container.querySelectorAll('.cs-option');
+
+    trigger.addEventListener('click', (e) => {
+      e.stopPropagation();
+      document.querySelectorAll('.custom-select.open').forEach(el => {
+        if (el !== container) el.classList.remove('open');
+      });
+      container.classList.toggle('open');
+    });
+
+    options.forEach(opt => {
+      opt.addEventListener('click', (e) => {
+        e.stopPropagation();
+        options.forEach(o => o.classList.remove('selected'));
+        opt.classList.add('selected');
+        label.textContent = opt.textContent;
+        hiddenInp.value = opt.getAttribute('data-val');
+        container.classList.remove('open');
+        if (onSelectCallback) onSelectCallback(hiddenInp.value);
+        saveSettings();
+      });
+    });
+  }
+
+  // Close custom selects when clicking outside
+  document.addEventListener('click', () => {
+    document.querySelectorAll('.custom-select.open').forEach(el => el.classList.remove('open'));
+  });
+
+  // Initialize all custom selects
+  initCustomSelect('cs-search-field');
+  initCustomSelect('cs-proxy-type');
+  initCustomSelect('cs-filter-category', () => applyFilters());
+  initCustomSelect('cs-modal-field');
+  initCustomSelect('cs-inbox-field');
+
+  // Load saved settings
+  loadSettings();
+
+  // Синхронизация переключателей автопоиска между сайдбаром и настройками
+  const chkUseAuto = document.getElementById('chk-use-auto');
+  const chkSettingsAuto = document.getElementById('chk-settings-auto');
+  if (chkUseAuto && chkSettingsAuto) {
+    chkUseAuto.addEventListener('change', () => {
+      chkSettingsAuto.checked = chkUseAuto.checked;
+      saveSettings();
+    });
+    chkSettingsAuto.addEventListener('change', () => {
+      chkUseAuto.checked = chkSettingsAuto.checked;
+      saveSettings();
+    });
+  }
+
+  // Auto-save listeners on all settings inputs and checkboxes
+  [
+    'inp-threads', 'inp-timeout', 'inp-retries',
+    'proto-imap', 'proto-pop3', 'proto-smtp',
+    'chk-use-proxies', 'chk-settings-auto-learn',
+    'inp-auto-timeout', 'inp-port-imap', 'inp-port-pop3',
+    'inp-port-smtp', 'inp-port-starttls', 'setting-out-dir'
+  ].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) {
+      el.addEventListener('input', saveSettings);
+      el.addEventListener('change', saveSettings);
+    }
+  });
+  const fileCredsInp = document.getElementById('file-creds');
+  const fileProxiesInp = document.getElementById('file-proxies');
+
+  document.getElementById('btn-load-creds').addEventListener('click', () => fileCredsInp.click());
+  document.getElementById('btn-load-proxies').addEventListener('click', () => fileProxiesInp.click());
+
+  fileCredsInp.addEventListener('change', (e) => {
+    const f = e.target.files[0];
+    if (!f) return;
+    const r = new FileReader();
+    r.onload = (ev) => {
+      credsRaw = ev.target.result || "";
+      credsMap.clear();
+      let count = 0;
+      for (const line of credsRaw.split(/\r?\n/)) {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith('#')) continue;
+        const idx = trimmed.indexOf(':');
+        if (idx !== -1) {
+          const u = trimmed.slice(0, idx).trim();
+          const p = trimmed.slice(idx + 1).trim();
+          if (u && p) {
+            credsMap.set(u, p);
+            count++;
+          }
+        }
+      }
+      document.getElementById('badge-creds').textContent = count;
+    };
+    r.readAsText(f);
+  });
+
+  fileProxiesInp.addEventListener('change', (e) => {
+    const f = e.target.files[0];
+    if (!f) return;
+    const r = new FileReader();
+    r.onload = (ev) => {
+      proxiesRaw = ev.target.result || "";
+      let count = 0;
+      for (const line of proxiesRaw.split(/\r?\n/)) {
+        const trimmed = line.trim();
+        if (trimmed && !trimmed.startsWith('#')) count++;
+      }
+      document.getElementById('badge-proxies').textContent = count;
+    };
+    r.readAsText(f);
+  });
+
+  // Start / Stop
+  const btnStart = document.getElementById('btn-start');
+  const btnStop = document.getElementById('btn-stop');
+  const statusText = document.getElementById('status-text');
+
+  btnStart.addEventListener('click', () => {
+    if (!credsRaw.trim()) {
+      alert("Пожалуйста, выберите файл с аккаунтами (Учётки)!");
+      return;
+    }
+
+    // Reset counters & rows
+    resetStats();
+    allRows = [];
+    successAccounts = [];
+    countryCounts.clear();
+    document.getElementById('rows-container').innerHTML = '';
+    renderInboxAccountsList();
+
+    btnStart.style.display = 'none';
+    btnStop.style.display = 'block';
+    statusText.textContent = "Статус: Работает";
+
+    const protocols = [];
+    if (document.getElementById('proto-imap').checked) protocols.push("IMAP");
+    if (document.getElementById('proto-pop3').checked) protocols.push("POP3");
+    if (document.getElementById('proto-smtp').checked) protocols.push("SMTP");
+
+    const threads = parseInt(document.getElementById('inp-threads').value, 10) || 200;
+    const timeout = parseInt(document.getElementById('inp-timeout').value, 10) || 10;
+    const retries = parseInt(document.getElementById('inp-retries').value, 10) || 3;
+    const field = document.getElementById('search-field').value;
+    const term = document.getElementById('search-term').value.trim();
+    const useProxies = document.getElementById('chk-use-proxies').checked;
+    const proxyType = document.getElementById('proxy-type').value;
+    const useAuto = document.getElementById('chk-use-auto') ? document.getElementById('chk-use-auto').checked : true;
+    const autoLearn = document.getElementById('chk-settings-auto-learn') ? document.getElementById('chk-settings-auto-learn').checked : true;
+    const autoTimeout = parseInt(document.getElementById('inp-auto-timeout')?.value, 10) || 1600;
+    const portImap = parseInt(document.getElementById('inp-port-imap')?.value, 10) || 993;
+    const portPop3 = parseInt(document.getElementById('inp-port-pop3')?.value, 10) || 995;
+    const portSmtp = parseInt(document.getElementById('inp-port-smtp')?.value, 10) || 465;
+    const portStarttls = parseInt(document.getElementById('inp-port-starttls')?.value, 10) || 587;
+    const outDir = document.getElementById('setting-out-dir')?.value.trim() || "results";
+
+    sendIPC({
+      cmd: 'start',
+      creds: credsRaw,
+      proxies: proxiesRaw,
+      useProxies,
+      proxyType,
+      protocols,
+      threads,
+      timeout,
+      retries,
+      field,
+      term,
+      use_auto: useAuto,
+      auto_learn: autoLearn,
+      auto_timeout: autoTimeout,
+      port_imap: portImap,
+      port_pop3: portPop3,
+      port_smtp: portSmtp,
+      port_starttls: portStarttls,
+      outDir
+    });
+  });
+
+  btnStop.addEventListener('click', () => {
+    sendIPC({ cmd: 'stop' });
+    btnStart.style.display = 'block';
+    btnStop.style.display = 'none';
+    statusText.textContent = "Статус: Остановлен";
+    updateAnalyticsView();
+  });
+
+  // Filters
+  const filterTextInp = document.getElementById('filter-text');
+  const btnResetFilter = document.getElementById('btn-reset-filter');
+
+  function applyFilters() {
+    const q = filterTextInp.value.trim().toLowerCase();
+    const cat = document.getElementById('filter-category').value;
+    const errorCats = new Set(['timeout', 'connection', 'tls', 'servernf', 'proxy', 'protocol']);
+
+    for (const r of allRows) {
+      let matchText = !q || r.login.toLowerCase().includes(q);
+      let matchCat = true;
+      if (cat === 'all') {
+        matchCat = true;
+      } else if (cat === 'auto') {
+        matchCat = r.auto;
+      } else if (cat === 'found') {
+        matchCat = r.found;
+      } else if (cat === 'corporate') {
+        matchCat = r.corporate;
+      } else if (cat === 'errors') {
+        matchCat = errorCats.has(r.category);
+      } else {
+        matchCat = (r.category === cat);
+      }
+      if (matchText && matchCat) {
+        r.elem.classList.remove('hidden');
+      } else {
+        r.elem.classList.add('hidden');
+      }
+    }
+  }
+
+  filterTextInp.addEventListener('input', applyFilters);
+  btnResetFilter.addEventListener('click', () => {
+    filterTextInp.value = '';
+    const cs = document.getElementById('cs-filter-category');
+    cs.querySelector('.cs-label').textContent = 'Все результаты';
+    cs.querySelector('input[type="hidden"]').value = 'all';
+    cs.querySelectorAll('.cs-option').forEach(o => o.classList.toggle('selected', o.getAttribute('data-val') === 'all'));
+    applyFilters();
+  });
+  document.getElementById('link-view-errors').addEventListener('click', () => {
+    const cs = document.getElementById('cs-filter-category');
+    cs.querySelector('.cs-label').textContent = 'Ошибки';
+    cs.querySelector('input[type="hidden"]').value = 'errors';
+    cs.querySelectorAll('.cs-option').forEach(o => o.classList.toggle('selected', o.getAttribute('data-val') === 'errors'));
+    applyFilters();
+  });
+
+  // Counters
+  const counters = {
+    success: 0,
+    auto: 0,
+    found: 0,
+    corporate: 0,
+    invalid: 0,
+    twofa: 0,
+    locked: 0,
+    ratelimited: 0,
+    captcha: 0,
+    timeout: 0,
+    connection: 0,
+    tls: 0,
+    servernf: 0,
+    proxy: 0,
+    protocol: 0
+  };
+
+  function resetStats() {
+    for (const k in counters) {
+      counters[k] = 0;
+      const el = document.getElementById(`c-${k}`);
+      if (el) el.textContent = '0';
+    }
+    document.getElementById('prog-fill').style.width = '0%';
+    document.getElementById('prog-counts').textContent = '0 / 0';
+    document.getElementById('prog-percent').textContent = '0%';
+  }
+
+  // Rust -> JS Callbacks
+  window.progress = function(done, total) {
+    const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+    document.getElementById('prog-fill').style.width = pct + '%';
+    document.getElementById('prog-counts').textContent = `${done} / ${total}`;
+    document.getElementById('prog-percent').textContent = `${pct}%`;
+  };
+
+  window.outdir = function(path) {
+    document.getElementById('outdir-note').textContent = path;
+  };
+
+  window.finish = function() {
+    btnStart.style.display = 'block';
+    btnStop.style.display = 'none';
+    statusText.textContent = "Статус: Остановлен";
+    updateAnalyticsView();
+  };
+
+  window.pushRow = function(row) {
+    // Update counters
+    if (counters.hasOwnProperty(row.category)) {
+      counters[row.category]++;
+      const el = document.getElementById(`c-${row.category}`);
+      if (el) el.textContent = counters[row.category];
+    }
+    const isAuto = Boolean(row.auto);
+    if (isAuto) {
+      counters.auto++;
+      const elAuto = document.getElementById('c-auto');
+      if (elAuto) elAuto.textContent = counters.auto;
+    }
+    if (row.found) {
+      counters.found++;
+      document.getElementById('c-found').textContent = counters.found;
+    }
+    if (row.corporate) {
+      counters.corporate++;
+      document.getElementById('c-corporate').textContent = counters.corporate;
+    }
+
+    if (row.country && row.country !== 'UN') {
+      countryCounts.set(row.country, (countryCounts.get(row.country) || 0) + 1);
+    }
+
+    if (row.category === 'success') {
+      successAccounts.push(row);
+      renderInboxAccountsList();
+    }
+
+    // Create DOM element
+    const container = document.getElementById('rows-container');
+    const div = document.createElement('div');
+    div.className = 'row-card';
+    if (row.error) {
+      div.title = `Ошибка: ${row.error}`;
+    }
+
+    const dotClass = `dot-${row.category}`;
+    const countDisplay = (row.category === 'success' && row.count > 0) ? row.count : '';
+    const autoBadgeHtml = isAuto ? `<div class="auto-badge" title="Сервер найден через автопоиск">AUTO</div>` : '';
+
+    let actionBtn = '<div class="btn-placeholder"></div>';
+    if (row.category === 'success') {
+      actionBtn = `
+        <button class="btn-open-box" title="Открыть ящик в приложении" onclick="openMailbox(${row.id}, '${escapeAttr(row.login)}')">
+          <svg viewBox="0 0 24 24"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path><polyline points="22,6 12,13 2,6"></polyline></svg>
+        </button>
+      `;
+    }
+
+    div.innerHTML = `
+      <div class="status-dot ${dotClass}"></div>
+      <div class="row-email">${escapeHtml(row.login)}</div>
+      ${autoBadgeHtml}
+      <div class="proto-badge">${escapeHtml(row.protocol || '—')}</div>
+      <div class="country-pill">${escapeHtml(row.country || 'UN')}</div>
+      <div class="row-count">${countDisplay}</div>
+      ${actionBtn}
+    `;
+
+    container.appendChild(div);
+
+    const record = {
+      id: row.id,
+      elem: div,
+      login: row.login,
+      category: row.category,
+      found: row.found,
+      corporate: row.corporate,
+      protocol: row.protocol,
+      country: row.country,
+      auto: isAuto
+    };
+    allRows.push(record);
+
+    // Apply current active filters to new row
+    const q = filterTextInp.value.trim().toLowerCase();
+    const cat = document.getElementById('filter-category').value;
+    const errorCats = new Set(['timeout', 'connection', 'tls', 'servernf', 'proxy', 'protocol']);
+    let matchText = !q || row.login.toLowerCase().includes(q);
+    let matchCat = (cat === 'all') || (cat === 'auto' && isAuto) || (cat === 'found' && row.found) || (cat === 'corporate' && row.corporate) || (cat === 'errors' && errorCats.has(row.category)) || (row.category === cat);
+    if (!matchText || !matchCat) {
+      div.classList.add('hidden');
+    }
+  };
+
+  function escapeHtml(s) {
+    if (!s) return '';
+    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+  function escapeAttr(s) {
+    if (!s) return '';
+    return String(s).replace(/'/g, "\\'");
+  }
+
+  // In-App Mailbox Modal Viewer
+  const modalOverlay = document.getElementById('modal-overlay');
+  const modalEmail = document.getElementById('modal-email');
+  const modalClose = document.getElementById('modal-close');
+  const modalTerm = document.getElementById('modal-term');
+  const modalBtnSearch = document.getElementById('modal-btn-search');
+  const modalContent = document.getElementById('modal-content');
+
+  window.openMailbox = function(id, login) {
+    const pass = credsMap.get(login) || "";
+    activeModalAcct = { id, login, pass };
+    modalEmail.textContent = login;
+    modalTerm.value = '';
+    modalOverlay.classList.remove('hidden');
+    fetchLetters(id, login, pass, "SUBJECT", "", "modal");
+  };
+
+  modalClose.addEventListener('click', () => {
+    modalOverlay.classList.add('hidden');
+    activeModalAcct = null;
+  });
+
+  modalBtnSearch.addEventListener('click', () => {
+    if (!activeModalAcct) return;
+    const f = document.getElementById('modal-field').value;
+    const t = modalTerm.value.trim();
+    fetchLetters(activeModalAcct.id, activeModalAcct.login, activeModalAcct.pass, f, t, "modal");
+  });
+
+  modalTerm.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') modalBtnSearch.click();
+  });
+
+  // Dedicated Inbox Explorer (Tab 2)
+  function renderInboxAccountsList() {
+    const container = document.getElementById('inbox-accts');
+    if (successAccounts.length === 0) {
+      container.innerHTML = `<div style="color:var(--muted); font-size:12px; text-align:center; padding:30px 10px;">Нет проверенных валидных аккаунтов. Запустите проверку во вкладке Чекер.</div>`;
+      return;
+    }
+    let html = '';
+    for (const a of successAccounts) {
+      const activeClass = (activeInboxAcct && activeInboxAcct.id === a.id) ? 'active' : '';
+      html += `
+        <div class="inbox-acct-item ${activeClass}" onclick="selectInboxAccount(${a.id}, '${escapeAttr(a.login)}')">
+          <div class="inbox-acct-mail">${escapeHtml(a.login)}</div>
+          <div class="inbox-acct-meta">
+            <span>${escapeHtml(a.protocol || 'IMAP')}</span>
+            <span>${a.count > 0 ? a.count + ' писем' : 'ящик доступен'}</span>
+          </div>
+        </div>
+      `;
+    }
+    container.innerHTML = html;
+  }
+
+  window.selectInboxAccount = function(id, login) {
+    const pass = credsMap.get(login) || "";
+    activeInboxAcct = { id, login, pass };
+    document.getElementById('inbox-active-email').textContent = login;
+    renderInboxAccountsList();
+    fetchLetters(id, login, pass, document.getElementById('inbox-field').value, document.getElementById('inbox-term').value.trim(), "inbox");
+  };
+
+  document.getElementById('inbox-btn-search').addEventListener('click', () => {
+    if (!activeInboxAcct) {
+      alert("Сначала выберите аккаунт слева!");
+      return;
+    }
+    const f = document.getElementById('inbox-field').value;
+    const t = document.getElementById('inbox-term').value.trim();
+    fetchLetters(activeInboxAcct.id, activeInboxAcct.login, activeInboxAcct.pass, f, t, "inbox");
+  });
+
+  document.getElementById('inbox-term').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') document.getElementById('inbox-btn-search').click();
+  });
+
+  function fetchLetters(id, login, pass, field, term, target) {
+    if (target === "modal") {
+      modalContent.innerHTML = '<div class="spinner"></div>';
+    } else {
+      document.getElementById('inbox-letters-container').innerHTML = '<div class="spinner"></div>';
+    }
+    const timeout = parseInt(document.getElementById('inp-timeout').value, 10) || 10;
+    const useProxies = document.getElementById('chk-use-proxies').checked;
+    const proxyType = document.getElementById('proxy-type').value;
+
+    sendIPC({
+      cmd: 'letters',
+      id,
+      login,
+      pass,
+      field,
+      term,
+      useProxies,
+      proxyType,
+      proxies: proxiesRaw,
+      timeout
+    });
+  }
+
+  window.letters = function(id, mails) {
+    let html = '';
+    if (!mails || mails.length === 0) {
+      html = '<div class="modal-msg">Писем не найдено.</div>';
+    } else {
+      for (const m of mails) {
+        const unseenClass = m.seen ? '' : 'unseen';
+        html += `
+          <div class="modal-letter ${unseenClass}">
+            <div class="m-top">
+              <span class="m-from">${escapeHtml(m.from)}</span>
+              <span>${escapeHtml(m.date)}</span>
+            </div>
+            <div class="m-subj">${escapeHtml(m.subject || '(без темы)')}</div>
+          </div>
+        `;
+      }
+    }
+
+    if (activeModalAcct && activeModalAcct.id === id) {
+      modalContent.innerHTML = html;
+    }
+    if (activeInboxAcct && activeInboxAcct.id === id) {
+      document.getElementById('inbox-letters-container').innerHTML = html;
+    }
+  };
+
+  window.lettersError = function(id, msg) {
+    const errHtml = `<div class="modal-err">Ошибка загрузки писем:<br>${escapeHtml(msg)}</div>`;
+    if (activeModalAcct && activeModalAcct.id === id) {
+      modalContent.innerHTML = errHtml;
+    }
+    if (activeInboxAcct && activeInboxAcct.id === id) {
+      document.getElementById('inbox-letters-container').innerHTML = errHtml;
+    }
+  };
+
+  // Analytics View Updater
+  function updateAnalyticsView() {
+    const total = allRows.length;
+    const succ = counters.success;
+    const found = counters.found;
+    const corp = counters.corporate;
+    const autoCount = counters.auto;
+
+    const succPct = total > 0 ? Math.round((succ / total) * 100) : 0;
+
+    document.getElementById('stat-rate').textContent = `${succPct}%`;
+    document.getElementById('stat-rate-sub').textContent = `${succ} валидных / ${total} всего`;
+    document.getElementById('stat-auto-cnt').textContent = autoCount;
+    document.getElementById('stat-found').textContent = found;
+    document.getElementById('stat-corp').textContent = corp;
+
+    // Protocol breakdown
+    let imapCnt = 0, pop3Cnt = 0, smtpCnt = 0;
+    for (const r of allRows) {
+      if (r.category === 'success') {
+        if (r.protocol === 'IMAP') imapCnt++;
+        else if (r.protocol === 'POP3') pop3Cnt++;
+        else if (r.protocol === 'SMTP') smtpCnt++;
+      }
+    }
+    document.getElementById('proto-cnt-imap').textContent = imapCnt;
+    document.getElementById('proto-cnt-pop3').textContent = pop3Cnt;
+    document.getElementById('proto-cnt-smtp').textContent = smtpCnt;
+
+    // Country pills
+    const pillsContainer = document.getElementById('stat-country-pills');
+    if (countryCounts.size === 0) {
+      pillsContainer.innerHTML = `<div style="color:var(--muted); font-size:12px;">Пока нет данных.</div>`;
+    } else {
+      let pillsHtml = '';
+      countryCounts.forEach((cnt, ctry) => {
+        pillsHtml += `<span class="country-pill" style="font-size:12px; padding:4px 10px;">${ctry}: <b>${cnt}</b></span>`;
+      });
+      pillsContainer.innerHTML = pillsHtml;
+    }
+  }
+</script>
+</body>
+</html>
