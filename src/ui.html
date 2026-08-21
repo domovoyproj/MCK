@@ -232,6 +232,132 @@
     box-shadow: 0 4px 14px rgba(239, 92, 92, 0.25);
     display: none;
   }
+  .btn-pause {
+    width: 100%;
+    padding: 9px 0;
+    margin-top: 6px;
+    border: 1px solid var(--warn);
+    border-radius: 8px;
+    background: rgba(224, 184, 74, 0.15);
+    color: var(--warn);
+    font-weight: 700;
+    font-size: 13px;
+    cursor: pointer;
+    box-shadow: 0 4px 14px rgba(224, 184, 74, 0.15);
+    display: none;
+    transition: background 0.15s, color 0.15s, border-color 0.15s, transform 0.05s;
+  }
+  .btn-pause:hover {
+    background: rgba(224, 184, 74, 0.25);
+  }
+  .btn-pause:active { transform: translateY(1px); }
+  .btn-resume {
+    border-color: var(--green);
+    background: rgba(52, 211, 153, 0.15);
+    color: var(--green);
+    box-shadow: 0 4px 14px rgba(52, 211, 153, 0.15);
+  }
+  .btn-resume:hover {
+    background: rgba(52, 211, 153, 0.25);
+  }
+
+  /* Конструктор правил поиска */
+  .rules-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 6px;
+  }
+  .rules-mode-toggle {
+    display: flex;
+    gap: 2px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid var(--stroke);
+    border-radius: 6px;
+    padding: 2px;
+  }
+  .rules-mode-btn {
+    padding: 2px 7px;
+    font-size: 10.5px;
+    font-weight: 700;
+    border-radius: 4px;
+    cursor: pointer;
+    color: var(--muted);
+    background: transparent;
+    border: none;
+    transition: background 0.15s, color 0.15s;
+  }
+  .rules-mode-btn.active {
+    background: rgba(52, 211, 153, 0.18);
+    color: var(--green);
+  }
+  .rule-item {
+    display: flex;
+    gap: 4px;
+    align-items: center;
+    margin-bottom: 6px;
+  }
+  .rule-field-select {
+    width: 85px;
+    padding: 5px 6px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid var(--stroke);
+    border-radius: 6px;
+    color: var(--txt);
+    font-size: 11px;
+    font-weight: 600;
+  }
+  .rule-field-select option {
+    background: var(--panel2);
+    color: var(--txt);
+  }
+  .rule-term-input {
+    flex: 1;
+    min-width: 0;
+    padding: 5px 8px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid var(--stroke);
+    border-radius: 6px;
+    color: var(--txt);
+    font-size: 12px;
+  }
+  .rule-term-input:focus, .rule-field-select:focus {
+    border-color: var(--green);
+  }
+  .btn-remove-rule {
+    width: 24px;
+    height: 24px;
+    display: grid;
+    place-items: center;
+    background: rgba(239, 92, 92, 0.1);
+    border: 1px solid rgba(239, 92, 92, 0.3);
+    border-radius: 6px;
+    color: var(--red);
+    cursor: pointer;
+    font-size: 11px;
+    flex-shrink: 0;
+    transition: background 0.15s;
+  }
+  .btn-remove-rule:hover {
+    background: rgba(239, 92, 92, 0.25);
+  }
+  .btn-add-rule {
+    width: 100%;
+    padding: 5px 0;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px dashed var(--stroke);
+    border-radius: 6px;
+    color: var(--muted);
+    font-size: 11.5px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s, border-color 0.15s;
+  }
+  .btn-add-rule:hover {
+    background: rgba(255, 255, 255, 0.06);
+    color: var(--txt);
+    border-color: rgba(255, 255, 255, 0.2);
+  }
   .btn-reset {
     width: 100%;
     padding: 8px 0;
@@ -1006,6 +1132,7 @@
         <div class="sec-title">Действия</div>
         <button class="btn-start" id="btn-start">Старт</button>
         <button class="btn-stop" id="btn-stop">Стоп</button>
+        <button class="btn-pause" id="btn-pause">Пауза</button>
         <button class="btn-reset" id="btn-reset">Сброс</button>
         <div class="status-line" id="status-text">Статус: Остановлен</div>
         <div class="outdir-note" id="outdir-note"></div>
@@ -1049,21 +1176,15 @@
 
       <!-- Поиск писем -->
       <div>
-        <div class="sec-title">Поиск писем</div>
-        <div class="custom-select" id="cs-search-field" tabindex="0">
-          <div class="cs-trigger">
-            <span class="cs-label">Тема (SUBJECT)</span>
-            <svg class="cs-arrow" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg>
+        <div class="rules-header">
+          <div class="sec-title" style="margin-bottom:0;">Поиск писем</div>
+          <div class="rules-mode-toggle">
+            <button class="rules-mode-btn active" id="mode-or" type="button" title="Хотя бы одно совпадение">ИЛИ</button>
+            <button class="rules-mode-btn" id="mode-and" type="button" title="Все правила должны совпасть">И</button>
           </div>
-          <div class="cs-options">
-            <div class="cs-option selected" data-val="SUBJECT">Тема (SUBJECT)</div>
-            <div class="cs-option" data-val="FROM">От кого (FROM)</div>
-            <div class="cs-option" data-val="TEXT">Текст (TEXT)</div>
-            <div class="cs-option" data-val="BODY">Тело (BODY)</div>
-          </div>
-          <input type="hidden" id="search-field" value="SUBJECT">
         </div>
-        <input class="input-box" id="search-term" type="text" placeholder="письмо для поиска (опц.)">
+        <div id="search-rules-container"></div>
+        <button class="btn-add-rule" id="btn-add-rule" type="button">+ Добавить правило</button>
       </div>
 
       <!-- Протоколы -->
@@ -1115,6 +1236,7 @@
           <div class="cs-options">
             <div class="cs-option selected" data-val="all">Все результаты</div>
             <div class="cs-option" data-val="auto">Автоопределено</div>
+            <div class="cs-option" data-val="outlook">Outlook / Hotmail</div>
             <div class="cs-option" data-val="success">Успешно</div>
             <div class="cs-option" data-val="found">Письмо найдено</div>
             <div class="cs-option" data-val="corporate">Корпоративные</div>
@@ -1468,7 +1590,8 @@
         protoSmtp: document.getElementById('proto-smtp')?.checked ?? true,
         useProxies: document.getElementById('chk-use-proxies')?.checked ?? false,
         proxyType: document.getElementById('proxy-type')?.value || 'socks5',
-        searchField: document.getElementById('search-field')?.value || 'SUBJECT',
+        searchRules: searchRules,
+        searchMode: searchMode,
         portImap: document.getElementById('inp-port-imap')?.value || '993',
         portPop3: document.getElementById('inp-port-pop3')?.value || '995',
         portSmtp: document.getElementById('inp-port-smtp')?.value || '465',
@@ -1526,8 +1649,20 @@
 
       if (cfg.useProxies !== undefined && document.getElementById('chk-use-proxies')) document.getElementById('chk-use-proxies').checked = cfg.useProxies;
       if (cfg.proxyType) setCustomSelectValue('cs-proxy-type', cfg.proxyType);
-      if (cfg.searchField) setCustomSelectValue('cs-search-field', cfg.searchField);
-
+      if (Array.isArray(cfg.searchRules)) {
+        searchRules = cfg.searchRules;
+      }
+      if (cfg.searchMode) {
+        searchMode = cfg.searchMode;
+        if (searchMode === 'and') {
+          document.getElementById('mode-and')?.classList.add('active');
+          document.getElementById('mode-or')?.classList.remove('active');
+        } else {
+          document.getElementById('mode-or')?.classList.add('active');
+          document.getElementById('mode-and')?.classList.remove('active');
+        }
+      }
+      renderSearchRules();
       if (cfg.portImap && document.getElementById('inp-port-imap')) document.getElementById('inp-port-imap').value = cfg.portImap;
       if (cfg.portPop3 && document.getElementById('inp-port-pop3')) document.getElementById('inp-port-pop3').value = cfg.portPop3;
       if (cfg.portSmtp && document.getElementById('inp-port-smtp')) document.getElementById('inp-port-smtp').value = cfg.portSmtp;
@@ -1584,12 +1719,96 @@
   });
 
   // Initialize all custom selects
-  initCustomSelect('cs-search-field');
   initCustomSelect('cs-proxy-type');
   initCustomSelect('cs-filter-category', () => applyFilters());
   initCustomSelect('cs-modal-field');
   initCustomSelect('cs-inbox-field');
 
+
+  // Microsoft domain helpers
+  function domainOf(login) {
+    if (!login) return '';
+    const parts = login.split('@');
+    return (parts[1] || '').toLowerCase();
+  }
+  function isMicrosoftDomain(domain) {
+    if (!domain) return false;
+    const d = domain.toLowerCase().trim();
+    const prefixes = ['outlook.', 'hotmail.', 'live.', 'msn.', 'passport.', 'windowslive.', 'office365.'];
+    for (const p of prefixes) {
+      if (d.startsWith(p)) return true;
+    }
+    return ['outlook.com', 'hotmail.com', 'live.com', 'msn.com', 'passport.com', 'windowslive.com', 'office365.com'].includes(d);
+  }
+
+  // Multi-rule Search Builder Engine
+  let searchRules = [];
+  let searchMode = 'or';
+
+  function renderSearchRules() {
+    const container = document.getElementById('search-rules-container');
+    if (!container) return;
+    container.innerHTML = '';
+    searchRules.forEach((rule, idx) => {
+      const item = document.createElement('div');
+      item.className = 'rule-item';
+      item.innerHTML = `
+        <select class="rule-field-select">
+          <option value="SUBJECT" ${rule.field === 'SUBJECT' ? 'selected' : ''}>Тема</option>
+          <option value="FROM" ${rule.field === 'FROM' ? 'selected' : ''}>От кого</option>
+          <option value="TEXT" ${rule.field === 'TEXT' ? 'selected' : ''}>Текст</option>
+          <option value="BODY" ${rule.field === 'BODY' ? 'selected' : ''}>Тело</option>
+          <option value="TO" ${rule.field === 'TO' ? 'selected' : ''}>Кому</option>
+        </select>
+        <input class="rule-term-input" type="text" placeholder="Строка поиска..." value="${escapeAttr(rule.term)}">
+        <button class="btn-remove-rule" type="button" title="Удалить правило">✕</button>
+      `;
+      const select = item.querySelector('.rule-field-select');
+      const input = item.querySelector('.rule-term-input');
+      const btnRemove = item.querySelector('.btn-remove-rule');
+
+      select.addEventListener('change', () => {
+        searchRules[idx].field = select.value;
+        saveSettings();
+      });
+      input.addEventListener('input', () => {
+        searchRules[idx].term = input.value;
+        saveSettings();
+      });
+      btnRemove.addEventListener('click', () => {
+        searchRules.splice(idx, 1);
+        renderSearchRules();
+        saveSettings();
+      });
+      container.appendChild(item);
+    });
+  }
+
+  const btnAddRule = document.getElementById('btn-add-rule');
+  if (btnAddRule) {
+    btnAddRule.addEventListener('click', () => {
+      searchRules.push({ field: 'SUBJECT', term: '' });
+      renderSearchRules();
+      saveSettings();
+    });
+  }
+
+  const modeOrBtn = document.getElementById('mode-or');
+  const modeAndBtn = document.getElementById('mode-and');
+  if (modeOrBtn && modeAndBtn) {
+    modeOrBtn.addEventListener('click', () => {
+      searchMode = 'or';
+      modeOrBtn.classList.add('active');
+      modeAndBtn.classList.remove('active');
+      saveSettings();
+    });
+    modeAndBtn.addEventListener('click', () => {
+      searchMode = 'and';
+      modeAndBtn.classList.add('active');
+      modeOrBtn.classList.remove('active');
+      saveSettings();
+    });
+  }
   // Load saved settings
   loadSettings();
 
@@ -1670,9 +1889,28 @@
   });
 
   // Start / Stop
+  // Start / Stop / Pause
   const btnStart = document.getElementById('btn-start');
   const btnStop = document.getElementById('btn-stop');
+  const btnPause = document.getElementById('btn-pause');
   const statusText = document.getElementById('status-text');
+  let isPaused = false;
+
+  btnPause.addEventListener('click', () => {
+    if (!isPaused) {
+      sendIPC({ cmd: 'pause' });
+      isPaused = true;
+      btnPause.textContent = "Продолжить";
+      btnPause.classList.add('btn-resume');
+      statusText.textContent = "Статус: На паузе";
+    } else {
+      sendIPC({ cmd: 'resume' });
+      isPaused = false;
+      btnPause.textContent = "Пауза";
+      btnPause.classList.remove('btn-resume');
+      statusText.textContent = "Статус: Работает";
+    }
+  });
 
   btnStart.addEventListener('click', () => {
     if (!credsRaw.trim()) {
@@ -1688,8 +1926,12 @@
     document.getElementById('rows-container').innerHTML = '';
     renderInboxAccountsList();
 
+    isPaused = false;
     btnStart.style.display = 'none';
     btnStop.style.display = 'block';
+    btnPause.style.display = 'block';
+    btnPause.textContent = "Пауза";
+    btnPause.classList.remove('btn-resume');
     statusText.textContent = "Статус: Работает";
 
     const protocols = [];
@@ -1700,8 +1942,6 @@
     const threads = parseInt(document.getElementById('inp-threads').value, 10) || 200;
     const timeout = parseInt(document.getElementById('inp-timeout').value, 10) || 10;
     const retries = parseInt(document.getElementById('inp-retries').value, 10) || 3;
-    const field = document.getElementById('search-field').value;
-    const term = document.getElementById('search-term').value.trim();
     const useProxies = document.getElementById('chk-use-proxies').checked;
     const proxyType = document.getElementById('proxy-type').value;
     const useAuto = document.getElementById('chk-use-auto') ? document.getElementById('chk-use-auto').checked : true;
@@ -1713,6 +1953,10 @@
     const portStarttls = parseInt(document.getElementById('inp-port-starttls')?.value, 10) || 587;
     const outDir = document.getElementById('setting-out-dir')?.value.trim() || "results";
 
+    const activeRules = searchRules.filter(r => r.term && r.term.trim().length > 0);
+    const fallbackField = activeRules[0]?.field || "SUBJECT";
+    const fallbackTerm = activeRules[0]?.term || "";
+
     sendIPC({
       cmd: 'start',
       creds: credsRaw,
@@ -1723,8 +1967,10 @@
       threads,
       timeout,
       retries,
-      field,
-      term,
+      field: fallbackField,
+      term: fallbackTerm,
+      rules: activeRules,
+      searchMode: searchMode,
       use_auto: useAuto,
       auto_learn: autoLearn,
       auto_timeout: autoTimeout,
@@ -1738,16 +1984,20 @@
 
   btnStop.addEventListener('click', () => {
     sendIPC({ cmd: 'stop' });
+    isPaused = false;
     btnStart.style.display = 'block';
     btnStop.style.display = 'none';
+    btnPause.style.display = 'none';
     statusText.textContent = "Статус: Остановлен";
     updateAnalyticsView();
   });
   const btnReset = document.getElementById('btn-reset');
   btnReset.addEventListener('click', () => {
     sendIPC({ cmd: 'stop' });
+    isPaused = false;
     btnStart.style.display = 'block';
     btnStop.style.display = 'none';
+    btnPause.style.display = 'none';
     statusText.textContent = "Статус: Остановлен";
 
     resetStats();
@@ -1766,7 +2016,6 @@
     renderInboxAccountsList();
     updateAnalyticsView();
   });
-
   // Filters
   const filterTextInp = document.getElementById('filter-text');
   const btnResetFilter = document.getElementById('btn-reset-filter');
@@ -1783,6 +2032,8 @@
         matchCat = true;
       } else if (cat === 'auto') {
         matchCat = r.auto;
+      } else if (cat === 'outlook') {
+        matchCat = (r.protocol === 'OUTLOOK') || isMicrosoftDomain(domainOf(r.login));
       } else if (cat === 'found') {
         matchCat = r.found;
       } else if (cat === 'corporate') {
@@ -1860,98 +2111,122 @@
   };
 
   window.finish = function() {
+    isPaused = false;
     btnStart.style.display = 'block';
     btnStop.style.display = 'none';
+    btnPause.style.display = 'none';
     statusText.textContent = "Статус: Остановлен";
     updateAnalyticsView();
   };
 
-  window.pushRow = function(row) {
-    // Update counters
-    if (counters.hasOwnProperty(row.category)) {
-      counters[row.category]++;
-      const el = document.getElementById(`c-${row.category}`);
-      if (el) el.textContent = counters[row.category];
+  window.pushRowsBatch = function(batch, done, total) {
+    if (!Array.isArray(batch) || batch.length === 0) {
+      if (typeof done === 'number' && typeof total === 'number') {
+        window.progress(done, total);
+      }
+      return;
     }
-    const isAuto = Boolean(row.auto);
-    if (isAuto) {
-      counters.auto++;
-      const elAuto = document.getElementById('c-auto');
-      if (elAuto) elAuto.textContent = counters.auto;
-    }
-    if (row.found) {
-      counters.found++;
-      document.getElementById('c-found').textContent = counters.found;
-    }
-    if (row.corporate) {
-      counters.corporate++;
-      document.getElementById('c-corporate').textContent = counters.corporate;
-    }
-
-    if (row.country && row.country !== 'UN') {
-      countryCounts.set(row.country, (countryCounts.get(row.country) || 0) + 1);
-    }
-
-    if (row.category === 'success') {
-      successAccounts.push(row);
-      renderInboxAccountsList();
-    }
-
-    // Create DOM element
     const container = document.getElementById('rows-container');
-    const div = document.createElement('div');
-    div.className = 'row-card';
-    if (row.error) {
-      div.title = `Ошибка: ${row.error}`;
-    }
-
-    const dotClass = `dot-${row.category}`;
-    const countDisplay = (row.category === 'success' && row.count > 0) ? row.count : '';
-    const autoBadgeHtml = isAuto ? `<div class="auto-badge" title="Сервер найден через автопоиск">AUTO</div>` : '';
-
-    let actionBtn = '<div class="btn-placeholder"></div>';
-    if (row.category === 'success') {
-      actionBtn = `
-        <button class="btn-open-box" title="Открыть ящик в приложении" onclick="openMailbox(${row.id}, '${escapeAttr(row.login)}')">
-          <svg viewBox="0 0 24 24"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path><polyline points="22,6 12,13 2,6"></polyline></svg>
-        </button>
-      `;
-    }
-
-    div.innerHTML = `
-      <div class="status-dot ${dotClass}"></div>
-      <div class="row-email">${escapeHtml(row.login)}</div>
-      ${autoBadgeHtml}
-      <div class="proto-badge">${escapeHtml(row.protocol || '—')}</div>
-      <div class="country-pill">${escapeHtml(row.country || 'UN')}</div>
-      <div class="row-count">${countDisplay}</div>
-      ${actionBtn}
-    `;
-
-    container.appendChild(div);
-
-    const record = {
-      id: row.id,
-      elem: div,
-      login: row.login,
-      category: row.category,
-      found: row.found,
-      corporate: row.corporate,
-      protocol: row.protocol,
-      country: row.country,
-      auto: isAuto
-    };
-    allRows.push(record);
-
-    // Apply current active filters to new row
+    const frag = document.createDocumentFragment();
     const q = filterTextInp.value.trim().toLowerCase();
     const cat = document.getElementById('filter-category').value;
     const errorCats = new Set(['timeout', 'connection', 'tls', 'servernf', 'proxy', 'protocol']);
-    let matchText = !q || row.login.toLowerCase().includes(q);
-    let matchCat = (cat === 'all') || (cat === 'auto' && isAuto) || (cat === 'found' && row.found) || (cat === 'corporate' && row.corporate) || (cat === 'errors' && errorCats.has(row.category)) || (row.category === cat);
-    if (!matchText || !matchCat) {
-      div.classList.add('hidden');
+
+    for (let i = 0; i < batch.length; i++) {
+      const row = batch[i];
+      if (counters.hasOwnProperty(row.category)) {
+        counters[row.category]++;
+      }
+      const isAuto = Boolean(row.auto);
+      if (isAuto) counters.auto++;
+      if (row.found) counters.found++;
+      if (row.corporate) counters.corporate++;
+
+      if (row.country && row.country !== 'UN') {
+        countryCounts.set(row.country, (countryCounts.get(row.country) || 0) + 1);
+      }
+      if (row.category === 'success') {
+        successAccounts.push(row);
+      }
+
+      const div = document.createElement('div');
+      div.className = 'row-card';
+      if (row.error) div.title = `Ошибка: ${row.error}`;
+
+      const dotClass = `dot-${row.category}`;
+      const countDisplay = (row.category === 'success' && row.count > 0) ? row.count : '';
+      const autoBadgeHtml = isAuto ? `<div class="auto-badge" title="Сервер найден через автопоиск">AUTO</div>` : '';
+
+      let actionBtn = '<div class="btn-placeholder"></div>';
+      if (row.category === 'success') {
+        actionBtn = `
+          <button class="btn-open-box" title="Открыть ящик в приложении" onclick="openMailbox(${row.id}, '${escapeAttr(row.login)}')">
+            <svg viewBox="0 0 24 24"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path><polyline points="22,6 12,13 2,6"></polyline></svg>
+          </button>
+        `;
+      }
+
+      div.innerHTML = `
+        <div class="status-dot ${dotClass}"></div>
+        <div class="row-email">${escapeHtml(row.login)}</div>
+        ${autoBadgeHtml}
+        <div class="proto-badge">${escapeHtml(row.protocol || '—')}</div>
+        <div class="country-pill">${escapeHtml(row.country || 'UN')}</div>
+        <div class="row-count">${countDisplay}</div>
+        ${actionBtn}
+      `;
+
+      let matchText = !q || row.login.toLowerCase().includes(q);
+      let matchCat = true;
+      if (cat === 'all') matchCat = true;
+      else if (cat === 'auto') matchCat = isAuto;
+      else if (cat === 'outlook') matchCat = (row.protocol === 'OUTLOOK') || isMicrosoftDomain(domainOf(row.login));
+      else if (cat === 'found') matchCat = row.found;
+      else if (cat === 'corporate') matchCat = row.corporate;
+      else if (cat === 'errors') matchCat = errorCats.has(row.category);
+      else matchCat = (row.category === cat);
+
+      if (!matchText || !matchCat) {
+        div.classList.add('hidden');
+      }
+
+      frag.appendChild(div);
+
+      allRows.push({
+        id: row.id,
+        elem: div,
+        login: row.login,
+        category: row.category,
+        found: row.found,
+        corporate: row.corporate,
+        protocol: row.protocol,
+        country: row.country,
+        auto: isAuto
+      });
     }
+
+    container.appendChild(frag);
+    renderInboxAccountsList();
+
+    // Update counter elements
+    for (const k in counters) {
+      const el = document.getElementById(`c-${k}`);
+      if (el) el.textContent = counters[k];
+    }
+    const elAuto = document.getElementById('c-auto');
+    if (elAuto) elAuto.textContent = counters.auto;
+    const elFound = document.getElementById('c-found');
+    if (elFound) elFound.textContent = counters.found;
+    const elCorp = document.getElementById('c-corporate');
+    if (elCorp) elCorp.textContent = counters.corporate;
+
+    if (typeof done === 'number' && typeof total === 'number') {
+      window.progress(done, total);
+    }
+  };
+
+  window.pushRow = function(row) {
+    window.pushRowsBatch([row]);
   };
 
   function escapeHtml(s) {
