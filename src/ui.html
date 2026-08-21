@@ -232,6 +232,25 @@
     box-shadow: 0 4px 14px rgba(239, 92, 92, 0.25);
     display: none;
   }
+  .btn-reset {
+    width: 100%;
+    padding: 8px 0;
+    margin-top: 6px;
+    border: 1px solid var(--stroke);
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.04);
+    color: var(--muted);
+    font-weight: 600;
+    font-size: 12px;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s, border-color 0.15s, transform 0.05s;
+  }
+  .btn-reset:hover {
+    background: rgba(255, 255, 255, 0.08);
+    color: var(--text);
+    border-color: rgba(255, 255, 255, 0.2);
+  }
+  .btn-reset:active { transform: translateY(1px); }
   .status-line {
     font-size: 11px;
     color: var(--muted);
@@ -987,6 +1006,7 @@
         <div class="sec-title">Действия</div>
         <button class="btn-start" id="btn-start">Старт</button>
         <button class="btn-stop" id="btn-stop">Стоп</button>
+        <button class="btn-reset" id="btn-reset">Сброс</button>
         <div class="status-line" id="status-text">Статус: Остановлен</div>
         <div class="outdir-note" id="outdir-note"></div>
       </div>
@@ -1721,6 +1741,29 @@
     btnStart.style.display = 'block';
     btnStop.style.display = 'none';
     statusText.textContent = "Статус: Остановлен";
+    updateAnalyticsView();
+  });
+  const btnReset = document.getElementById('btn-reset');
+  btnReset.addEventListener('click', () => {
+    sendIPC({ cmd: 'stop' });
+    btnStart.style.display = 'block';
+    btnStop.style.display = 'none';
+    statusText.textContent = "Статус: Остановлен";
+
+    resetStats();
+    allRows = [];
+    successAccounts = [];
+    countryCounts.clear();
+    activeInboxAcct = null;
+    activeModalAcct = null;
+
+    document.getElementById('rows-container').innerHTML = '';
+    document.getElementById('outdir-note').textContent = '';
+    const inboxActiveEmail = document.getElementById('inbox-active-email');
+    if (inboxActiveEmail) inboxActiveEmail.textContent = 'Выберите аккаунт слева';
+    const inboxLetters = document.getElementById('inbox-letters-container');
+    if (inboxLetters) inboxLetters.innerHTML = '<div style="color:var(--muted); font-size:12px; text-align:center; padding:50px 10px;">Выберите аккаунт для просмотра писем</div>';
+    renderInboxAccountsList();
     updateAnalyticsView();
   });
 
