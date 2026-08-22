@@ -2598,20 +2598,23 @@ fn main() -> wry::Result<()> {
         })
         .build(&window)?;
 
-    // Rust-driven startup license check: reliably updates the EPP badge without
-    // depending on JS/window.ipc readiness (which races on first paint and left
-    // the badge stuck at "Проверка..."). Verify once, then re-push the result a
-    // few times so it lands after the page script defines window.eppLicenseStatus.
+    // Rust-driven startup license check. The badge used to hang on "Проверка..."
+    // because updating it was initiated from JS via window.ipc, which races the
+    // first paint. Here we verify once natively, then repeatedly drive the badge
+    // DOM directly (independent of window.eppLicenseStatus being defined yet),
+    // retrying for ~12s so it lands as soon as the page is ready.
     let startup_proxy = proxy.clone();
     std::thread::spawn(move || {
         let st = epp_api::verify_license();
-        if let Ok(js) = serde_json::to_string(&st) {
-            for _ in 0..4 {
-                std::thread::sleep(std::time::Duration::from_millis(600));
-                let _ = startup_proxy.send_event(UserEvent::Eval(format!(
-                    "if(window.eppLicenseStatus){{window.eppLicenseStatus({js});}}"
-                )));
-            }
+        let Ok(js) = serde_json::to_string(&st) else {
+            return;
+        };
+        let script = format!(
+            "(function(){{var st={js};var b=document.getElementById('epp-badge');if(!b)return false;if(typeof window.eppLicenseStatus==='function'){{window.eppLicenseStatus(st);}}else{{b.className='epp-license-badge '+(st.active?'active':(st.error?'inactive':'checking'));b.textContent=st.active?('\\u25CF EPP: \\u0410\\u043a\\u0442\\u0438\\u0432\\u043d\\u0430 ('+(st.email||'\\u041b\\u0438\\u0446\\u0435\\u043d\\u0437\\u0438\\u044f')+')'):'\\u25CF EPP: \\u041d\\u0435 \\u0430\\u043a\\u0442\\u0438\\u0432\\u043d\\u0430';}}return true;}})()"
+        );
+        for _ in 0..24 {
+            std::thread::sleep(std::time::Duration::from_millis(500));
+            let _ = startup_proxy.send_event(UserEvent::Eval(script.clone()));
         }
     });
     event_loop.run(move |event, _, control_flow| {
