@@ -44,7 +44,20 @@ pub struct LicenseStatus {
 static CURRENT_STATUS: RwLock<Option<LicenseStatus>> = RwLock::new(None);
 
 pub fn hwid() -> String {
-    let raw = machine_uid::get().unwrap_or_else(|_| "unknown-machine".into());
+    let mut raw = String::new();
+    #[cfg(target_os = "windows")]
+    {
+        if let Ok(hk) = winreg::RegKey::predef(winreg::enums::HKEY_LOCAL_MACHINE)
+            .open_subkey("SOFTWARE\\Microsoft\\Cryptography")
+        {
+            if let Ok(guid) = hk.get_value::<String, _>("MachineGuid") {
+                raw = guid;
+            }
+        }
+    }
+    if raw.is_empty() {
+        raw = machine_uid::get().unwrap_or_else(|_| "unknown-machine".into());
+    }
     let mut h = Sha256::new();
     h.update(raw.as_bytes());
     hex::encode(h.finalize())
