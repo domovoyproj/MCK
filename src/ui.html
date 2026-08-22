@@ -1272,12 +1272,10 @@
       <!-- Файлы -->
       <div>
         <div class="sec-title">Файлы</div>
-        <input type="file" id="file-creds" accept=".txt,text/plain" style="display:none;">
         <div class="file-row" id="btn-load-creds">
           <span class="file-row-name">Учётки (login:pass)</span>
           <span class="file-badge" id="badge-creds">0</span>
         </div>
-        <input type="file" id="file-proxies" accept=".txt,text/plain" style="display:none;">
         <div class="file-row" id="btn-load-proxies">
           <span class="file-row-name">Прокси</span>
           <span class="file-badge" id="badge-proxies">0</span>
@@ -1296,6 +1294,7 @@
           Открыть результаты
         </button>
         <div class="outdir-note" id="outdir-note" title="Нажмите, чтобы открыть папку с результатами"></div>
+        <div class="status-line" id="status-text">Статус: Остановлен</div>
       </div>
 
       <!-- Настройки -->
@@ -2051,51 +2050,6 @@
     sendIPC({ cmd: 'pick_proxies' });
   });
 
-  fileCredsInp.addEventListener('change', (e) => {
-    const f = e.target.files[0];
-    if (!f) return;
-    credsPath = "";
-    const r = new FileReader();
-    r.onload = (ev) => {
-      credsRaw = ev.target.result || "";
-      credsMap.clear();
-      let count = 0;
-      for (const line of credsRaw.split(/\r?\n/)) {
-        const trimmed = line.trim();
-        if (!trimmed || trimmed.startsWith('#')) continue;
-        const idx = trimmed.indexOf(':');
-        if (idx !== -1) {
-          const u = trimmed.slice(0, idx).trim();
-          const p = trimmed.slice(idx + 1).trim();
-          if (u && p) {
-            credsMap.set(u, p);
-            count++;
-          }
-        }
-      }
-      credsCount = count;
-      document.getElementById('badge-creds').textContent = count;
-    };
-    r.readAsText(f);
-  });
-
-  fileProxiesInp.addEventListener('change', (e) => {
-    const f = e.target.files[0];
-    if (!f) return;
-    proxiesPath = "";
-    const r = new FileReader();
-    r.onload = (ev) => {
-      proxiesRaw = ev.target.result || "";
-      let count = 0;
-      for (const line of proxiesRaw.split(/\r?\n/)) {
-        const trimmed = line.trim();
-        if (trimmed && !trimmed.startsWith('#')) count++;
-      }
-      proxiesCount = count;
-      document.getElementById('badge-proxies').textContent = count;
-    };
-    r.readAsText(f);
-  });
 
   // Start / Stop
   // Start / Stop / Pause
