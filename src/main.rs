@@ -2597,6 +2597,23 @@ fn main() -> wry::Result<()> {
             handle_ipc(req.into_body(), ipc_proxy.clone());
         })
         .build(&window)?;
+
+    // Rust-driven startup license check: reliably updates the EPP badge without
+    // depending on JS/window.ipc readiness (which races on first paint and left
+    // the badge stuck at "Проверка..."). Verify once, then re-push the result a
+    // few times so it lands after the page script defines window.eppLicenseStatus.
+    let startup_proxy = proxy.clone();
+    std::thread::spawn(move || {
+        let st = epp_api::verify_license();
+        if let Ok(js) = serde_json::to_string(&st) {
+            for _ in 0..4 {
+                std::thread::sleep(std::time::Duration::from_millis(600));
+                let _ = startup_proxy.send_event(UserEvent::Eval(format!(
+                    "if(window.eppLicenseStatus){{window.eppLicenseStatus({js});}}"
+                )));
+            }
+        }
+    });
     event_loop.run(move |event, _, control_flow| {
         *control_flow = ControlFlow::Wait;
         match event {
