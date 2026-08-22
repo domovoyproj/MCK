@@ -2794,13 +2794,17 @@
     const m = document.getElementById('modal-epp-auth');
     if (m) m.style.display = 'none';
   }
-
   function checkEppLicense() {
     const badge = document.getElementById('epp-badge');
     if (badge) badge.textContent = '● EPP: Проверка...';
     sendIPC({ cmd: 'epp_check' });
+    // Fallback if no response comes back in 15 seconds
+    setTimeout(() => {
+      if (gEppStatus.active === false && gEppStatus.error === null) {
+        window.eppLicenseStatus({ active: false, email: '', error: 'Ошибка: сервер лицензий недоступен (таймаут 15с)' });
+      }
+    }, 15000);
   }
-
   function submitEppLogin() {
     const email = document.getElementById('inp-epp-email').value;
     const pass = document.getElementById('inp-epp-pass').value;
