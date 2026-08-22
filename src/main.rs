@@ -2091,6 +2091,9 @@ struct In {
     proxies: String,
     #[serde(default, alias = "proxies_path")]
     proxies_path: String,
+    #[serde(default, alias = "settings_json")]
+    settings_json: String,
+    #[serde(default = "default_imap_port", alias = "port_imap")]
     port_imap: u16,
     #[serde(default = "default_pop3_port", alias = "port_pop3")]
     port_pop3: u16,
@@ -2473,6 +2476,25 @@ fn handle_ipc(body: String, proxy: EventLoopProxy<UserEvent>) {
             epp_api::clear_token();
             let _ = proxy.send_event(UserEvent::Eval("window.eppLicenseStatus({ active: false, email: '', error: 'Вы вышли из аккаунта' });".into()));
         }
+        "settings_save" => {
+            if !msg.settings_json.trim().is_empty() {
+                if let Some(dirs) = directories::ProjectDirs::from("com", "domovoy", "mailcheck") {
+                    let _ = std::fs::create_dir_all(dirs.config_dir());
+                    let _ = std::fs::write(dirs.config_dir().join("settings.json"), &msg.settings_json);
+                }
+            }
+        }
+        "settings_load" => {
+            let proxy_evt = proxy.clone();
+            if let Some(dirs) = directories::ProjectDirs::from("com", "domovoy", "mailcheck") {
+                if let Ok(content) = std::fs::read_to_string(dirs.config_dir().join("settings.json")) {
+                    if !content.trim().is_empty() {
+                        let escaped = content.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', "\\n").replace('\r', "");
+                        let _ = proxy_evt.send_event(UserEvent::Eval(format!("window.applyLoadedSettings(\"{escaped}\");")));
+                    }
+                }
+            }
+        }
         _ => {}
     }
 }
@@ -2533,7 +2555,13 @@ fn main() -> wry::Result<()> {
     apply_dark_window_attributes(window.hwnd() as *mut std::ffi::c_void);
 
     let ipc_proxy = proxy.clone();
-    let webview = WebViewBuilder::new()
+    let data_dir = directories::ProjectDirs::from("com", "domovoy", "mailcheck")
+        .map(|p| p.data_local_dir().to_path_buf())
+        .unwrap_or_else(|| std::env::temp_dir().join("mck_data"));
+    let _ = std::fs::create_dir_all(&data_dir);
+
+    let mut web_context = wry::WebContext::new(Some(data_dir));
+    let webview = WebViewBuilder::new_with_web_context(&mut web_context)
         .with_url("app://localhost/")
         .with_custom_protocol("app".into(), |_id, _req| {
             Response::builder()
@@ -2546,7 +2574,6 @@ fn main() -> wry::Result<()> {
             handle_ipc(req.into_body(), ipc_proxy.clone());
         })
         .build(&window)?;
-
     event_loop.run(move |event, _, control_flow| {
         *control_flow = ControlFlow::Wait;
         match event {

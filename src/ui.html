@@ -1774,7 +1774,9 @@
         portStarttls: document.getElementById('inp-port-starttls')?.value || '587',
         outDir: document.getElementById('setting-out-dir')?.value || 'results'
       };
-      localStorage.setItem(SETTINGS_KEY, JSON.stringify(cfg));
+      const json = JSON.stringify(cfg);
+      localStorage.setItem(SETTINGS_KEY, json);
+      sendIPC({ cmd: 'settings_save', settings_json: json });
     } catch (e) {
       console.warn("Could not save settings:", e);
     }
@@ -1796,11 +1798,10 @@
     });
   }
 
-  function loadSettings() {
+  window.applyLoadedSettings = function(jsonOrObj) {
     try {
-      const raw = localStorage.getItem(SETTINGS_KEY);
-      if (!raw) return;
-      const cfg = JSON.parse(raw);
+      const cfg = typeof jsonOrObj === 'string' ? JSON.parse(jsonOrObj) : jsonOrObj;
+      if (!cfg) return;
 
       if (cfg.threads && document.getElementById('inp-threads')) document.getElementById('inp-threads').value = cfg.threads;
       if (cfg.timeout && document.getElementById('inp-timeout')) document.getElementById('inp-timeout').value = cfg.timeout;
@@ -1848,10 +1849,21 @@
       if (cfg.portStarttls && document.getElementById('inp-port-starttls')) document.getElementById('inp-port-starttls').value = cfg.portStarttls;
       if (cfg.outDir && document.getElementById('setting-out-dir')) document.getElementById('setting-out-dir').value = cfg.outDir;
     } catch (e) {
-      console.warn("Could not load settings:", e);
+      console.warn("Could not apply settings:", e);
     }
-  }
+  };
 
+  function loadSettings() {
+    try {
+      const raw = localStorage.getItem(SETTINGS_KEY);
+      if (raw) {
+        applyLoadedSettings(raw);
+      }
+    } catch (e) {
+      console.warn("Could not load local settings:", e);
+    }
+    sendIPC({ cmd: 'settings_load' });
+  }
   // Steppers
   window.stepVal = function(id, delta, min, max) {
     const inp = document.getElementById(id);
