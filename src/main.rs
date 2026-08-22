@@ -645,6 +645,9 @@ pub fn discover_hosts(
             if let Ok(mut c) = cache.lock() {
                 c.insert(domain.to_string(), h.clone());
             }
+            if use_shared_hosts {
+                hosts_api::submit(domain.to_string(), h.clone());
+            }
             return (h, true);
         }
 
@@ -1553,34 +1556,7 @@ pub fn check_account(id: u64, a: &Acct, cfg: &RunCfg) -> Row {
                 match res {
                     Ok((count, mut found)) => {
                         let corporate = !is_freemail(&domain);
-                        if corporate && cfg.auto_learn {
-                            let mut learned: Option<Hosts> = None;
-                            if let Ok(mut c) = cfg.auto_cache.lock() {
-                                let mut cached = hosts.clone();
-                                match proto.to_uppercase().as_str() {
-                                    "IMAP" => {
-                                        cached.imap.retain(|h| h != host);
-                                        cached.imap.insert(0, host.clone());
-                                    }
-                                    "POP3" => {
-                                        cached.pop3.retain(|h| h != host);
-                                        cached.pop3.insert(0, host.clone());
-                                    }
-                                    "SMTP" => {
-                                        cached.smtp.retain(|h| h != host);
-                                        cached.smtp.insert(0, host.clone());
-                                    }
-                                    _ => {}
-                                }
-                                c.insert(domain.clone(), cached.clone());
-                                learned = Some(cached);
-                            }
-                            if cfg.use_shared_hosts {
-                                if let Some(h) = learned {
-                                    hosts_api::submit(domain.clone(), h);
-                                }
-                            }
-                        }
+                        learn_and_submit(&domain, proto, host, &hosts, cfg);
 
                         if !found && (!cfg.rules.is_empty() || !cfg.term.trim().is_empty()) && proto.to_uppercase() != "IMAP" {
                             if let Ok(m) = search_match(a, cfg) {
@@ -1607,6 +1583,7 @@ pub fn check_account(id: u64, a: &Acct, cfg: &RunCfg) -> Row {
                     Err((cat, err)) => {
                         if matches!(cat, Cat::Invalid | Cat::TwoFA | Cat::Locked) {
                             stop_proto_hosts = true;
+                            learn_and_submit(&domain, proto, host, &hosts, cfg);
                         }
                         let should_replace = match &best_fail {
                             None => true,
@@ -1662,6 +1639,44 @@ pub fn check_account(id: u64, a: &Acct, cfg: &RunCfg) -> Row {
             auto: is_auto,
             proxy: "".into(),
             error: "не удалось подключиться".into(),
+        }
+    }
+}
+
+fn learn_and_submit(
+    domain: &str,
+    proto: &str,
+    host: &str,
+    hosts: &Hosts,
+    cfg: &RunCfg,
+) {
+    if !cfg.auto_learn {
+        return;
+    }
+    let mut learned: Option<Hosts> = None;
+    if let Ok(mut c) = cfg.auto_cache.lock() {
+        let mut cached = hosts.clone();
+        match proto.to_uppercase().as_str() {
+            "IMAP" => {
+                cached.imap.retain(|h| h != host);
+                cached.imap.insert(0, host.to_string());
+            }
+            "POP3" => {
+                cached.pop3.retain(|h| h != host);
+                cached.pop3.insert(0, host.to_string());
+            }
+            "SMTP" => {
+                cached.smtp.retain(|h| h != host);
+                cached.smtp.insert(0, host.to_string());
+            }
+            _ => {}
+        }
+        c.insert(domain.to_string(), cached.clone());
+        learned = Some(cached);
+    }
+    if cfg.use_shared_hosts {
+        if let Some(h) = learned {
+            hosts_api::submit(domain.to_string(), h);
         }
     }
 }

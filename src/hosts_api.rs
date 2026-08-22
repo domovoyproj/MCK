@@ -45,6 +45,9 @@ pub fn fetch(domain: &str, timeout: Duration) -> Option<Hosts> {
 /// Fire-and-forget submit of newly-learned hosts. No-op without a saved
 /// EPP token. Server merges into the existing entry.
 pub fn submit(domain: String, hosts: Hosts) {
+    if hosts.imap.is_empty() && hosts.pop3.is_empty() && hosts.smtp.is_empty() {
+        return;
+    }
     std::thread::spawn(move || {
         let Some(tok) = epp_api::load_token() else {
             return;
