@@ -68,9 +68,10 @@ pub fn hwid() -> String {
 pub fn load_token() -> Option<SavedToken> {
     if let Ok(tok) = std::env::var("EPP_TOKEN") {
         if !tok.trim().is_empty() {
+            let email = std::env::var("EPP_EMAIL").unwrap_or_else(|_| "EPP User".into());
             return Some(SavedToken {
                 token: tok.trim().to_string(),
-                email: "EPP User".into(),
+                email,
             });
         }
     }

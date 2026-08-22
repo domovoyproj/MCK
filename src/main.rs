@@ -2469,7 +2469,7 @@ fn handle_ipc(body: String, proxy: EventLoopProxy<UserEvent>) {
         "epp_check" => {
             let proxy_evt = proxy.clone();
             std::thread::spawn(move || {
-                let st = epp_api::get_cached_status();
+                let st = epp_api::verify_license();
                 if let Ok(js) = serde_json::to_string(&st) {
                     let _ = proxy_evt.send_event(UserEvent::Eval(format!("window.eppLicenseStatus({js});")));
                 }
