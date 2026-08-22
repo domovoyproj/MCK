@@ -1467,14 +1467,19 @@ pub fn parse_accounts(raw: &str) -> Vec<Acct> {
             if l.is_empty() || l.starts_with('#') {
                 return None;
             }
-            let (u, p) = l.split_once(':')?;
+            let delim = if l.contains(':') { ':' }
+                        else if l.contains(';') { ';' }
+                        else if l.contains('|') { '|' }
+                        else if l.contains('\t') { '\t' }
+                        else { return None; };
+            let (u, p) = l.split_once(delim)?;
             let (u, p) = (u.trim(), p.trim());
             if u.is_empty() || p.is_empty() {
                 None
             } else {
                 Some(Acct {
-                    login: u.into(),
-                    pass: p.into(),
+                    login: u.to_string(),
+                    pass: p.to_string(),
                 })
             }
         })
@@ -1496,13 +1501,20 @@ pub fn load_accounts_from_path_or_str(path: &str, raw: &str) -> Vec<Acct> {
                 let line_lossy = String::from_utf8_lossy(&buf);
                 let l = line_lossy.trim_end_matches(|c| c == '\r' || c == '\n').trim();
                 if !l.is_empty() && !l.starts_with('#') {
-                    if let Some((u, p)) = l.split_once(':') {
-                        let (u, p) = (u.trim(), p.trim());
-                        if !u.is_empty() && !p.is_empty() {
-                            accts.push(Acct {
-                                login: u.to_string(),
-                                pass: p.to_string(),
-                            });
+                    let delim = if l.contains(':') { ':' }
+                               else if l.contains(';') { ';' }
+                               else if l.contains('|') { '|' }
+                               else if l.contains('\t') { '\t' }
+                               else { '\0' };
+                    if delim != '\0' {
+                        if let Some((u, p)) = l.split_once(delim) {
+                            let (u, p) = (u.trim(), p.trim());
+                            if !u.is_empty() && !p.is_empty() {
+                                accts.push(Acct {
+                                    login: u.to_string(),
+                                    pass: p.to_string(),
+                                });
+                            }
                         }
                     }
                 }
@@ -2287,7 +2299,7 @@ fn handle_ipc(body: String, proxy: EventLoopProxy<UserEvent>) {
                             if bytes_read == 0 { break; }
                             let line = String::from_utf8_lossy(&buf);
                             let t = line.trim();
-                            if !t.is_empty() && !t.starts_with('#') && t.contains(':') {
+                            if !t.is_empty() && !t.starts_with('#') && (t.contains(':') || t.contains(';') || t.contains('|') || t.contains('\t')) {
                                 c += 1;
                             }
                             buf.clear();
