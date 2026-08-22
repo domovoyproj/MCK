@@ -1287,15 +1287,14 @@
       <!-- Действия -->
       <div>
         <div class="sec-title">Действия</div>
-        <button class="btn-start" id="btn-start">Старт</button>
+        <button class="btn-start" id="btn-start" onclick="window.startChecking && window.startChecking()">Старт</button>
         <button class="btn-stop" id="btn-stop">Стоп</button>
         <button class="btn-pause" id="btn-pause">Пауза</button>
         <button class="btn-reset" id="btn-reset">Сброс</button>
-        <button class="btn-open-results" id="btn-open-results" type="button">
+        <button class="btn-open-results" id="btn-open-results" type="button" onclick="window.openResultsDir && window.openResultsDir()">
           <svg viewBox="0 0 24 24"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>
           Открыть результаты
         </button>
-        <div class="status-line" id="status-text">Статус: Остановлен</div>
         <div class="outdir-note" id="outdir-note" title="Нажмите, чтобы открыть папку с результатами"></div>
       </div>
 
@@ -2122,8 +2121,8 @@
     }
   });
 
-  btnStart.addEventListener('click', () => {
-    if (!gEppStatus.active) {
+  window.startChecking = function() {
+    if (!gEppStatus.active && gEppStatus.error) {
       openEppModal();
       return;
     }
@@ -2197,7 +2196,8 @@
       port_starttls: portStarttls,
       outDir
     });
-  });
+  };
+  btnStart.addEventListener('click', window.startChecking);
 
   btnStop.addEventListener('click', () => {
     sendIPC({ cmd: 'stop' });
@@ -2233,19 +2233,17 @@
     renderInboxAccountsList();
     updateAnalyticsView();
   });
+  window.openResultsDir = function() {
+    const outDir = document.getElementById('setting-out-dir')?.value.trim() || "results";
+    sendIPC({ cmd: 'open_results', outDir });
+  };
   const btnOpenResults = document.getElementById('btn-open-results');
   if (btnOpenResults) {
-    btnOpenResults.addEventListener('click', () => {
-      const outDir = document.getElementById('setting-out-dir')?.value.trim() || "results";
-      sendIPC({ cmd: 'open_results', outDir });
-    });
+    btnOpenResults.addEventListener('click', window.openResultsDir);
   }
   const outdirNoteEl = document.getElementById('outdir-note');
   if (outdirNoteEl) {
-    outdirNoteEl.addEventListener('click', () => {
-      const outDir = document.getElementById('setting-out-dir')?.value.trim() || "results";
-      sendIPC({ cmd: 'open_results', outDir });
-    });
+    outdirNoteEl.addEventListener('click', window.openResultsDir);
   }
 
   function copyToClipboard(text) {
