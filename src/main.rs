@@ -3,6 +3,7 @@
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
 mod epp_api;
+mod hosts_api;
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
@@ -611,10 +612,12 @@ pub fn autoconfig_lookup(domain: &str, timeout: Duration) -> Option<Hosts> {
     }
 }
 
-/// Автоопределение хостов (база конфигураций, ISPDB, TLD-эвристики и динамическое кэширование)
+/// Автоопределение хостов (база конфигураций, ISPDB, TLD-эвристики и динамическое кэширование).
+/// Если `use_shared_hosts` включён — сначала спрашиваем единую БД на сервере EPP.
 pub fn discover_hosts(
     domain: &str,
     use_auto: bool,
+    use_shared_hosts: bool,
     auto_timeout: Duration,
     cache: &Mutex<HashMap<String, Hosts>>,
 ) -> (Hosts, bool) {
@@ -626,6 +629,15 @@ pub fn discover_hosts(
 
     if let Some(h) = known_provider(domain) {
         return (h, false);
+    }
+
+    if use_shared_hosts {
+        if let Some(h) = hosts_api::fetch(domain, Duration::from_millis(600)) {
+            if let Ok(mut c) = cache.lock() {
+                c.insert(domain.to_string(), h.clone());
+            }
+            return (h, true);
+        }
     }
 
     if use_auto {
@@ -1176,7 +1188,7 @@ pub fn search_match(a: &Acct, cfg: &RunCfg) -> Result<bool, (Cat, String)> {
         return Ok(false);
     }
     let domain = domain_of(&a.login);
-    let (hosts, _) = discover_hosts(&domain, cfg.use_auto, cfg.auto_timeout, &cfg.auto_cache);
+    let (hosts, _) = discover_hosts(&domain, cfg.use_auto, cfg.use_shared_hosts, cfg.auto_timeout, &cfg.auto_cache);
     let mut last_err = (Cat::Connection, "нет IMAP-хостов".into());
 
     let rules = if !cfg.rules.is_empty() {
@@ -1237,7 +1249,7 @@ pub struct Mail {
 
 pub fn try_fetch(a: &Acct, cfg: &RunCfg, field: &str, term: &str) -> Result<Vec<Mail>, String> {
     let domain = domain_of(&a.login);
-    let (hosts, _) = discover_hosts(&domain, cfg.use_auto, cfg.auto_timeout, &cfg.auto_cache);
+    let (hosts, _) = discover_hosts(&domain, cfg.use_auto, cfg.use_shared_hosts, cfg.auto_timeout, &cfg.auto_cache);
     let mut last_err = "нет IMAP-хостов для данного домена".to_string();
 
     for host in hosts.imap {
@@ -1373,6 +1385,7 @@ pub struct RunCfg {
     pub port_smtp: u16,
     pub port_starttls: u16,
     pub auto_cache: Arc<Mutex<HashMap<String, Hosts>>>,
+    pub use_shared_hosts: bool,
 }
 
 #[derive(Serialize, Clone, Debug)]
@@ -1422,7 +1435,7 @@ pub fn check_account(id: u64, a: &Acct, cfg: &RunCfg) -> Row {
     }
 
     let ctry = country(&domain);
-    let (hosts, is_auto) = discover_hosts(&domain, cfg.use_auto, cfg.auto_timeout, &cfg.auto_cache);
+    let (hosts, is_auto) = discover_hosts(&domain, cfg.use_auto, cfg.use_shared_hosts, cfg.auto_timeout, &cfg.auto_cache);
     let mut best_fail: Option<(Cat, String, String, String, String)> = None;
 
     // 1. Проверка через прямой Microsoft OAuth / ROPS при обнаружении связи с Microsoft
@@ -1541,6 +1554,7 @@ pub fn check_account(id: u64, a: &Acct, cfg: &RunCfg) -> Row {
                     Ok((count, mut found)) => {
                         let corporate = !is_freemail(&domain);
                         if corporate && cfg.auto_learn {
+                            let mut learned: Option<Hosts> = None;
                             if let Ok(mut c) = cfg.auto_cache.lock() {
                                 let mut cached = hosts.clone();
                                 match proto.to_uppercase().as_str() {
@@ -1558,7 +1572,13 @@ pub fn check_account(id: u64, a: &Acct, cfg: &RunCfg) -> Row {
                                     }
                                     _ => {}
                                 }
-                                c.insert(domain.clone(), cached);
+                                c.insert(domain.clone(), cached.clone());
+                                learned = Some(cached);
+                            }
+                            if cfg.use_shared_hosts {
+                                if let Some(h) = learned {
+                                    hosts_api::submit(domain.clone(), h);
+                                }
                             }
                         }
 
@@ -1933,6 +1953,8 @@ struct In {
     use_auto: bool,
     #[serde(default, alias = "out_dir")]
     out_dir: String,
+    #[serde(default = "default_true", alias = "use_shared_hosts")]
+    use_shared_hosts: bool,
 }
 
 fn default_imap_port() -> u16 { 993 }
@@ -2028,6 +2050,7 @@ fn handle_ipc(body: String, proxy: EventLoopProxy<UserEvent>) {
                 port_smtp: if msg.port_smtp == 0 { 465 } else { msg.port_smtp },
                 port_starttls: if msg.port_starttls == 0 { 587 } else { msg.port_starttls },
                 auto_cache: AUTO_CACHE.clone(),
+                use_shared_hosts: msg.use_shared_hosts,
             };
 
             let dir_name = if msg.out_dir.trim().is_empty() {
@@ -2151,6 +2174,7 @@ fn handle_ipc(body: String, proxy: EventLoopProxy<UserEvent>) {
                 port_smtp: 465,
                 port_starttls: 587,
                 auto_cache: AUTO_CACHE.clone(),
+                use_shared_hosts: msg.use_shared_hosts,
             };
             let id = msg.id;
             let field = if msg.field.is_empty() {
@@ -2249,6 +2273,9 @@ fn apply_dark_window_attributes(hwnd: *mut std::ffi::c_void) {
 }
 
 fn main() -> wry::Result<()> {
+    #[cfg(target_os = "windows")]
+    bundle_webview2_loader();
+
     let event_loop = EventLoopBuilder::<UserEvent>::with_user_event().build();
     let proxy = event_loop.create_proxy();
 
@@ -2304,6 +2331,22 @@ fn main() -> wry::Result<()> {
             _ => {}
         }
     });
+}
+
+#[cfg(target_os = "windows")]
+fn bundle_webview2_loader() {
+    use std::os::windows::ffi::OsStrExt;
+    const DLL: &[u8] = include_bytes!("../WebView2Loader.dll");
+    let dir = std::env::temp_dir().join("mck_runtime");
+    if std::fs::create_dir_all(&dir).is_err() { return; }
+    let path = dir.join("WebView2Loader.dll");
+    // Rewrite only if size differs (avoid touching busy DLL on re-runs).
+    let needs_write = std::fs::metadata(&path).map(|m| m.len() as usize != DLL.len()).unwrap_or(true);
+    if needs_write { let _ = std::fs::write(&path, DLL); }
+    let wide: Vec<u16> = dir.as_os_str().encode_wide().chain(std::iter::once(0)).collect();
+    #[link(name = "kernel32")]
+    extern "system" { fn SetDllDirectoryW(lp: *const u16) -> i32; }
+    unsafe { SetDllDirectoryW(wide.as_ptr()); }
 }
 
 // ---------- UNIT TESTS ----------
@@ -2400,7 +2443,7 @@ mod tests {
     #[test]
     fn auto_discovery_test() {
         let cache = Mutex::new(HashMap::new());
-        let (hosts, is_auto) = discover_hosts("custom-company.de", true, Duration::from_millis(1600), &cache);
+        let (hosts, is_auto) = discover_hosts("custom-company.de", true, false, Duration::from_millis(1600), &cache);
         assert!(is_auto);
         assert!(hosts.imap.contains(&"imap.custom-company.de".to_string()));
     }
@@ -2475,6 +2518,7 @@ mod tests {
             port_smtp: 465,
             port_starttls: 587,
             auto_cache: Arc::new(Mutex::new(HashMap::new())),
+            use_shared_hosts: false,
         };
         let r = check_account(1, &acct, &cfg);
         assert_eq!(

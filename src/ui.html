@@ -1579,6 +1579,16 @@
         </div>
         <div class="settings-row">
           <div class="settings-info">
+            <h4>Расширенная база почтовых доменов</h4>
+            <p>Использовать единую БД автоопределённых серверов на сервере EPP: запросы к ней и отправка новых найденных доменов. Отключите для полностью локальной работы.</p>
+          </div>
+          <label class="switch">
+            <input type="checkbox" id="chk-settings-shared-hosts" checked>
+            <span class="slider"></span>
+          </label>
+        </div>
+        <div class="settings-row">
+          <div class="settings-info">
             <h4>Таймаут запроса автопоиска</h4>
             <p>Лимит ожидания ответа от базы автоконфигураций</p>
           </div>
@@ -1745,6 +1755,7 @@
         retries: document.getElementById('inp-retries')?.value || '3',
         useAuto: document.getElementById('chk-use-auto')?.checked ?? true,
         autoLearn: document.getElementById('chk-settings-auto-learn')?.checked ?? true,
+        useSharedHosts: document.getElementById('chk-settings-shared-hosts')?.checked ?? true,
         autoTimeout: document.getElementById('inp-auto-timeout')?.value || '1600',
         protoImap: document.getElementById('proto-imap')?.checked ?? true,
         protoPop3: document.getElementById('proto-pop3')?.checked ?? true,
@@ -1799,6 +1810,9 @@
       }
       if (cfg.autoLearn !== undefined && document.getElementById('chk-settings-auto-learn')) {
         document.getElementById('chk-settings-auto-learn').checked = cfg.autoLearn;
+      }
+      if (cfg.useSharedHosts !== undefined && document.getElementById('chk-settings-shared-hosts')) {
+        document.getElementById('chk-settings-shared-hosts').checked = cfg.useSharedHosts;
       }
       if (cfg.autoTimeout && document.getElementById('inp-auto-timeout')) {
         document.getElementById('inp-auto-timeout').value = cfg.autoTimeout;
@@ -2110,6 +2124,7 @@
     const proxyType = document.getElementById('proxy-type').value;
     const useAuto = document.getElementById('chk-use-auto') ? document.getElementById('chk-use-auto').checked : true;
     const autoLearn = document.getElementById('chk-settings-auto-learn') ? document.getElementById('chk-settings-auto-learn').checked : true;
+    const useSharedHosts = document.getElementById('chk-settings-shared-hosts') ? document.getElementById('chk-settings-shared-hosts').checked : true;
     const autoTimeout = parseInt(document.getElementById('inp-auto-timeout')?.value, 10) || 1600;
     const portImap = parseInt(document.getElementById('inp-port-imap')?.value, 10) || 993;
     const portPop3 = parseInt(document.getElementById('inp-port-pop3')?.value, 10) || 995;
@@ -2137,6 +2152,7 @@
       searchMode: searchMode,
       use_auto: useAuto,
       auto_learn: autoLearn,
+      use_shared_hosts: useSharedHosts,
       auto_timeout: autoTimeout,
       port_imap: portImap,
       port_pop3: portPop3,
