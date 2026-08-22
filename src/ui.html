@@ -405,6 +405,35 @@
     border-color: rgba(255, 255, 255, 0.2);
   }
   .btn-reset:active { transform: translateY(1px); }
+  .btn-open-results {
+    width: 100%;
+    padding: 8px 0;
+    margin-top: 6px;
+    border: 1px solid rgba(52, 211, 153, 0.3);
+    border-radius: 8px;
+    background: rgba(52, 211, 153, 0.08);
+    color: var(--green);
+    font-weight: 600;
+    font-size: 12px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    transition: background 0.15s, color 0.15s, border-color 0.15s, transform 0.05s;
+  }
+  .btn-open-results:hover {
+    background: rgba(52, 211, 153, 0.16);
+    border-color: var(--green);
+  }
+  .btn-open-results:active { transform: translateY(1px); }
+  .btn-open-results svg {
+    width: 14px;
+    height: 14px;
+    stroke: currentColor;
+    fill: none;
+    stroke-width: 2;
+  }
   .status-line {
     font-size: 11px;
     color: var(--muted);
@@ -417,6 +446,12 @@
     word-break: break-all;
     margin-top: 2px;
     text-align: center;
+    cursor: pointer;
+    transition: color 0.15s;
+  }
+  .outdir-note:hover {
+    color: var(--green);
+    text-decoration: underline;
   }
 
   /* Степперы настроек */
@@ -716,6 +751,36 @@
     white-space: nowrap;
     -webkit-user-select: text;
     user-select: text;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    border-radius: 4px;
+    padding: 2px 4px;
+    margin: -2px -4px;
+    transition: background 0.15s, color 0.15s;
+  }
+  .row-email:hover {
+    background: rgba(52, 211, 153, 0.08);
+    color: var(--green);
+  }
+  .row-email .email-text {
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .row-email .pass-inline {
+    background: rgba(52, 211, 153, 0.15);
+    border: 1px solid rgba(52, 211, 153, 0.35);
+    color: var(--green);
+    border-radius: 4px;
+    padding: 1px 6px;
+    font-size: 11px;
+    font-weight: 600;
+    flex-shrink: 0;
+    animation: fadeIn 0.15s ease;
+  }
+  .row-email .pass-inline.hidden {
+    display: none;
   }
   .proto-badge {
     background: var(--badge);
@@ -1103,6 +1168,35 @@
   @keyframes spin { to { transform: rotate(360deg); } }
   .modal-msg { text-align: center; color: var(--muted); margin: 30px 0; font-size: 12.5px; }
   .modal-err { text-align: center; color: var(--red); margin: 30px 0; font-size: 12.5px; }
+  .toast-notification {
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    background: #151D1C;
+    border: 1px solid var(--green);
+    border-radius: 8px;
+    padding: 10px 16px;
+    color: var(--txt);
+    font-size: 13px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6), 0 0 12px rgba(52, 211, 153, 0.2);
+    z-index: 9999;
+    animation: toastIn 0.2s ease;
+    pointer-events: auto;
+    max-width: 400px;
+  }
+  .toast-notification .toast-pass {
+    font-family: var(--mono);
+    color: var(--green);
+    font-weight: 700;
+    word-break: break-all;
+  }
+  @keyframes toastIn {
+    from { opacity: 0; transform: translateY(12px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
 </style>
 </head>
 <body>
@@ -1197,8 +1291,12 @@
         <button class="btn-stop" id="btn-stop">Стоп</button>
         <button class="btn-pause" id="btn-pause">Пауза</button>
         <button class="btn-reset" id="btn-reset">Сброс</button>
+        <button class="btn-open-results" id="btn-open-results" type="button">
+          <svg viewBox="0 0 24 24"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>
+          Открыть результаты
+        </button>
         <div class="status-line" id="status-text">Статус: Остановлен</div>
-        <div class="outdir-note" id="outdir-note"></div>
+        <div class="outdir-note" id="outdir-note" title="Нажмите, чтобы открыть папку с результатами"></div>
       </div>
 
       <!-- Настройки -->
@@ -2082,6 +2180,89 @@
     renderInboxAccountsList();
     updateAnalyticsView();
   });
+  const btnOpenResults = document.getElementById('btn-open-results');
+  if (btnOpenResults) {
+    btnOpenResults.addEventListener('click', () => {
+      const outDir = document.getElementById('setting-out-dir')?.value.trim() || "results";
+      sendIPC({ cmd: 'open_results', outDir });
+    });
+  }
+  const outdirNoteEl = document.getElementById('outdir-note');
+  if (outdirNoteEl) {
+    outdirNoteEl.addEventListener('click', () => {
+      const outDir = document.getElementById('setting-out-dir')?.value.trim() || "results";
+      sendIPC({ cmd: 'open_results', outDir });
+    });
+  }
+
+  function copyToClipboard(text) {
+    if (!text) return;
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).catch(() => {
+        fallbackCopy(text);
+      });
+    } else {
+      fallbackCopy(text);
+    }
+  }
+
+  function fallbackCopy(text) {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.focus();
+    ta.select();
+    try { document.execCommand('copy'); } catch (e) {}
+    document.body.removeChild(ta);
+  }
+
+  let toastTimer = null;
+  function showToast(msg, pass) {
+    const existing = document.getElementById('app-toast');
+    if (existing) existing.remove();
+    if (toastTimer) clearTimeout(toastTimer);
+
+    const t = document.createElement('div');
+    t.id = 'app-toast';
+    t.className = 'toast-notification';
+    t.innerHTML = `
+      <svg style="width:16px; height:16px; stroke:var(--green); fill:none; stroke-width:2; flex-shrink:0;" viewBox="0 0 24 24"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"></path><rect x="8" y="2" width="8" height="4" rx="1" ry="1"></rect></svg>
+      <div>
+        <div style="font-size:11px; color:var(--muted);">${escapeHtml(msg)}</div>
+        <div class="toast-pass">${escapeHtml(pass || '—')}</div>
+      </div>
+    `;
+    document.body.appendChild(t);
+    toastTimer = setTimeout(() => {
+      if (t && t.parentNode) t.parentNode.removeChild(t);
+    }, 3000);
+  }
+
+  document.getElementById('rows-container').addEventListener('click', (e) => {
+    const emailEl = e.target.closest('.row-email');
+    if (!emailEl) return;
+    const login = emailEl.getAttribute('data-login') || '';
+    const pass = emailEl.getAttribute('data-pass') || credsMap.get(login) || '';
+
+    let passInline = emailEl.querySelector('.pass-inline');
+    if (!passInline) {
+      passInline = document.createElement('span');
+      passInline.className = 'pass-inline';
+      passInline.textContent = pass ? `: ${pass}` : ':(нет пароля)';
+      emailEl.appendChild(passInline);
+    } else {
+      passInline.classList.toggle('hidden');
+    }
+
+    if (pass) {
+      copyToClipboard(pass);
+      showToast(`Пароль скопирован (${login}):`, pass);
+    } else {
+      showToast(`Пароль для ${login} не найден`, '');
+    }
+  });
   // Filters
   const filterTextInp = document.getElementById('filter-text');
   const btnResetFilter = document.getElementById('btn-reset-filter');
@@ -2232,16 +2413,19 @@
         `;
       }
 
+      const pass = row.pass || credsMap.get(row.login) || '';
       div.innerHTML = `
         <div class="status-dot ${dotClass}"></div>
-        <div class="row-email">${escapeHtml(row.login)}</div>
+        <div class="row-email" data-login="${escapeAttr(row.login)}" data-pass="${escapeAttr(pass)}" title="Нажмите, чтобы показать/скопировать пароль">
+          <span class="email-text">${escapeHtml(row.login)}</span>
+          <span class="pass-inline hidden" title="Нажмите для скрытия">${escapeHtml(pass ? ': ' + pass : '')}</span>
+        </div>
         ${autoBadgeHtml}
         <div class="proto-badge">${escapeHtml(row.protocol || '—')}</div>
         <div class="country-pill">${escapeHtml(row.country || 'UN')}</div>
         <div class="row-count">${countDisplay}</div>
         ${actionBtn}
       `;
-
       let matchText = !q || row.login.toLowerCase().includes(q);
       let matchCat = true;
       if (cat === 'all') matchCat = true;
@@ -2262,6 +2446,7 @@
         id: row.id,
         elem: div,
         login: row.login,
+        pass: pass,
         category: row.category,
         found: row.found,
         corporate: row.corporate,

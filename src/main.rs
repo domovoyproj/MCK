@@ -1379,6 +1379,7 @@ pub struct RunCfg {
 pub struct Row {
     pub id: u64,
     pub login: String,
+    pub pass: String,
     pub protocol: String,
     pub host: String,
     pub country: String,
@@ -1406,6 +1407,7 @@ pub fn check_account(id: u64, a: &Acct, cfg: &RunCfg) -> Row {
         return Row {
             id,
             login: a.login.clone(),
+            pass: a.pass.clone(),
             protocol: "—".into(),
             host: "".into(),
             country: "UN".into(),
@@ -1443,6 +1445,7 @@ pub fn check_account(id: u64, a: &Acct, cfg: &RunCfg) -> Row {
                 return Row {
                     id,
                     login: a.login.clone(),
+                    pass: a.pass.clone(),
                     protocol: "OUTLOOK".into(),
                     host: "login.live.com".into(),
                     country: ctry,
@@ -1460,6 +1463,7 @@ pub fn check_account(id: u64, a: &Acct, cfg: &RunCfg) -> Row {
                     return Row {
                         id,
                         login: a.login.clone(),
+                        pass: a.pass.clone(),
                         protocol: "OUTLOOK".into(),
                         host: "login.live.com".into(),
                         country: ctry,
@@ -1567,6 +1571,7 @@ pub fn check_account(id: u64, a: &Acct, cfg: &RunCfg) -> Row {
                         return Row {
                             id,
                             login: a.login.clone(),
+                            pass: a.pass.clone(),
                             protocol: proto.to_uppercase(),
                             host: host.clone(),
                             country: ctry,
@@ -1606,6 +1611,7 @@ pub fn check_account(id: u64, a: &Acct, cfg: &RunCfg) -> Row {
         Row {
             id,
             login: a.login.clone(),
+            pass: a.pass.clone(),
             protocol: if matches!(cat, Cat::Invalid | Cat::TwoFA | Cat::Locked) {
                 proto
             } else {
@@ -1625,6 +1631,7 @@ pub fn check_account(id: u64, a: &Acct, cfg: &RunCfg) -> Row {
         Row {
             id,
             login: a.login.clone(),
+            pass: a.pass.clone(),
             protocol: "—".into(),
             host: "".into(),
             country: ctry,
@@ -1943,12 +1950,12 @@ fn handle_ipc(body: String, proxy: EventLoopProxy<UserEvent>) {
 
     match msg.cmd.as_str() {
         "start" => {
-            // Check EPP License before starting
+            // Check EPP License status
             let lic = epp_api::get_cached_status();
             if !lic.active {
                 let lic2 = epp_api::verify_license();
                 if !lic2.active {
-                    epp_api::self_destruct();
+                    let _ = proxy.send_event(UserEvent::Eval("if(typeof openEppModal==='function')openEppModal();".into()));
                 }
             }
 
@@ -2074,6 +2081,30 @@ fn handle_ipc(body: String, proxy: EventLoopProxy<UserEvent>) {
             BUSY.store(false, Ordering::SeqCst);
             let _ = proxy.send_event(UserEvent::Eval("window.finish();".into()));
         }
+        "open_results" => {
+            let dir_name = if msg.out_dir.trim().is_empty() {
+                "results".to_string()
+            } else {
+                sanitize(&msg.out_dir)
+            };
+            let out_dir = std::env::current_exe()
+                .ok()
+                .and_then(|p| p.parent().map(|d| d.join(&dir_name)))
+                .unwrap_or_else(|| PathBuf::from(&dir_name));
+            let _ = std::fs::create_dir_all(&out_dir);
+            #[cfg(target_os = "windows")]
+            {
+                let _ = std::process::Command::new("explorer").arg(&out_dir).spawn();
+            }
+            #[cfg(target_os = "macos")]
+            {
+                let _ = std::process::Command::new("open").arg(&out_dir).spawn();
+            }
+            #[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
+            {
+                let _ = std::process::Command::new("xdg-open").arg(&out_dir).spawn();
+            }
+        }
         "win" => {
             let action = match msg.action.as_str() {
                 "close" => WinAction::Close,
@@ -2152,9 +2183,6 @@ fn handle_ipc(body: String, proxy: EventLoopProxy<UserEvent>) {
             let proxy_evt = proxy.clone();
             std::thread::spawn(move || {
                 let st = epp_api::verify_license();
-                if !st.active {
-                    epp_api::self_destruct();
-                }
                 if let Ok(js) = serde_json::to_string(&st) {
                     let _ = proxy_evt.send_event(UserEvent::Eval(format!("window.eppLicenseStatus({js});")));
                 }
@@ -2182,7 +2210,7 @@ fn handle_ipc(body: String, proxy: EventLoopProxy<UserEvent>) {
         }
         "epp_logout" => {
             epp_api::clear_token();
-            epp_api::self_destruct();
+            let _ = proxy.send_event(UserEvent::Eval("window.eppLicenseStatus({ active: false, email: '', error: 'Вы вышли из аккаунта' });".into()));
         }
         _ => {}
     }
