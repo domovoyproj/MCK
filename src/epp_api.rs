@@ -56,7 +56,9 @@ pub fn hwid() -> String {
         }
     }
     if raw.is_empty() {
-        raw = machine_uid::get().unwrap_or_else(|_| "unknown-machine".into());
+        let host = std::env::var("COMPUTERNAME").unwrap_or_else(|_| "unknown-host".into());
+        let user = std::env::var("USERNAME").unwrap_or_else(|_| "unknown-user".into());
+        raw = format!("{host}-{user}-fallback-hwid");
     }
     let mut h = Sha256::new();
     h.update(raw.as_bytes());

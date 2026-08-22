@@ -1485,16 +1485,16 @@ pub fn load_accounts_from_path_or_str(path: &str, raw: &str) -> Vec<Acct> {
     if !path.trim().is_empty() {
         if let Ok(file) = std::fs::File::open(path) {
             use std::io::BufRead;
-            // 8 MB buffer for fast disk read of large files (700MB+)
             let mut reader = std::io::BufReader::with_capacity(8 * 1024 * 1024, file);
             let mut accts = Vec::with_capacity(262144);
-            let mut buf = String::with_capacity(256);
+            let mut buf = Vec::with_capacity(256);
 
-            while let Ok(bytes_read) = reader.read_line(&mut buf) {
+            while let Ok(bytes_read) = reader.read_until(b'\n', &mut buf) {
                 if bytes_read == 0 {
                     break;
                 }
-                let l = buf.trim_end_matches(|c| c == '\r' || c == '\n').trim();
+                let line_lossy = String::from_utf8_lossy(&buf);
+                let l = line_lossy.trim_end_matches(|c| c == '\r' || c == '\n').trim();
                 if !l.is_empty() && !l.starts_with('#') {
                     if let Some((u, p)) = l.split_once(':') {
                         let (u, p) = (u.trim(), p.trim());
@@ -2277,14 +2277,22 @@ fn handle_ipc(body: String, proxy: EventLoopProxy<UserEvent>) {
                     let escaped_path = path_str.replace('\\', "/").replace('"', "\\\"");
                     let escaped_name = file_name.replace('"', "\\\"");
 
-                    // Count lines quickly
+                    // Count lines quickly (lossy UTF-8 to handle large mixed files)
                     let count = if let Ok(f) = std::fs::File::open(&file) {
                         use std::io::BufRead;
-                        let reader = std::io::BufReader::with_capacity(1024 * 1024, f);
-                        reader.lines().flatten().filter(|l| {
-                            let t = l.trim();
-                            !t.is_empty() && !t.starts_with('#') && t.contains(':')
-                        }).count()
+                        let mut reader = std::io::BufReader::with_capacity(8 * 1024 * 1024, f);
+                        let mut buf = Vec::with_capacity(256);
+                        let mut c = 0;
+                        while let Ok(bytes_read) = reader.read_until(b'\n', &mut buf) {
+                            if bytes_read == 0 { break; }
+                            let line = String::from_utf8_lossy(&buf);
+                            let t = line.trim();
+                            if !t.is_empty() && !t.starts_with('#') && t.contains(':') {
+                                c += 1;
+                            }
+                            buf.clear();
+                        }
+                        c
                     } else {
                         0
                     };
