@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use std::sync::RwLock;
 use std::time::Duration;
 
-pub const PRODUCT_SLUG: &str = "mailcheck";
+pub const PRODUCT_SLUG: &str = "MCK";
 
 pub fn base_url() -> String {
     std::env::var("EPP_BASE").unwrap_or_else(|_| "https://domovoy1337.online".into())
