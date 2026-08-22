@@ -55,21 +55,35 @@ pub fn resolve_dns(host: &str, port: u16) -> Result<Vec<SocketAddr>, (Cat, Strin
     if let Ok(guard) = DNS_CACHE.read() {
         if let Some((addrs, ts)) = guard.get(&key) {
             if now.duration_since(*ts) < Duration::from_secs(600) {
+                if addrs.is_empty() {
+                    return Err((Cat::ServerNf, "хост не найден в DNS (кэш)".into()));
+                }
                 return Ok(addrs.clone());
             }
         }
     }
-    let addrs = (host, port)
-        .to_socket_addrs()
-        .map_err(|e| (Cat::ServerNf, format!("ошибка DNS: {e}")))?
-        .collect::<Vec<_>>();
-    if addrs.is_empty() {
-        return Err((Cat::ServerNf, "нет доступных IP-адресов".into()));
+    let res = (host, port).to_socket_addrs();
+    match res {
+        Ok(iter) => {
+            let addrs = iter.collect::<Vec<_>>();
+            if addrs.is_empty() {
+                if let Ok(mut guard) = DNS_CACHE.write() {
+                    guard.insert(key, (Vec::new(), now));
+                }
+                return Err((Cat::ServerNf, "нет доступных IP-адресов".into()));
+            }
+            if let Ok(mut guard) = DNS_CACHE.write() {
+                guard.insert(key, (addrs.clone(), now));
+            }
+            Ok(addrs)
+        }
+        Err(e) => {
+            if let Ok(mut guard) = DNS_CACHE.write() {
+                guard.insert(key, (Vec::new(), now));
+            }
+            Err((Cat::ServerNf, format!("ошибка DNS: {e}")))
+        }
     }
-    if let Ok(mut guard) = DNS_CACHE.write() {
-        guard.insert(key, (addrs.clone(), now));
-    }
-    Ok(addrs)
 }
 
 pub fn get_tls_connector(insecure: bool) -> Result<&'static native_tls::TlsConnector, (Cat, String)> {
@@ -499,14 +513,15 @@ pub fn known_provider(domain: &str) -> Option<Hosts> {
             pop3: vec!["pop.rambler.ru".into()],
             smtp: vec!["smtp.rambler.ru".into()],
         }),
-        "outlook.com" | "hotmail.com" | "live.com" | "msn.com" | "outlook.ru" | "hotmail.ru" => {
+        "outlook.com" | "hotmail.com" | "live.com" | "msn.com" | "outlook.ru" | "hotmail.ru"
+        | "passport.com" | "windowslive.com" | "live.ru" | "hotmail.fr" | "hotmail.de" | "hotmail.it" | "hotmail.co.uk" => {
             Some(Hosts {
                 imap: vec!["outlook.office365.com".into()],
                 pop3: vec!["outlook.office365.com".into()],
                 smtp: vec!["smtp.office365.com".into()],
             })
         }
-        "yahoo.com" | "ymail.com" | "rocketmail.com" => Some(Hosts {
+        "yahoo.com" | "ymail.com" | "rocketmail.com" | "yahoo.fr" | "yahoo.de" | "yahoo.co.uk" | "yahoo.es" | "yahoo.it" => Some(Hosts {
             imap: vec!["imap.mail.yahoo.com".into()],
             pop3: vec!["pop.mail.yahoo.com".into()],
             smtp: vec!["smtp.mail.yahoo.com".into()],
@@ -516,25 +531,130 @@ pub fn known_provider(domain: &str) -> Option<Hosts> {
             pop3: vec![],
             smtp: vec!["smtp.mail.me.com".into()],
         }),
-        "aol.com" => Some(Hosts {
+        "aol.com" | "aim.com" => Some(Hosts {
             imap: vec!["imap.aol.com".into()],
             pop3: vec!["pop.aol.com".into()],
             smtp: vec!["smtp.aol.com".into()],
         }),
-        "gmx.com" | "gmx.net" | "gmx.de" => Some(Hosts {
-            imap: vec!["imap.gmx.com".into()],
-            pop3: vec!["pop.gmx.com".into()],
-            smtp: vec!["mail.gmx.com".into()],
+        "gmx.com" | "gmx.net" | "gmx.de" | "gmx.at" | "gmx.ch" => Some(Hosts {
+            imap: vec!["imap.gmx.com".into(), "imap.gmx.net".into()],
+            pop3: vec!["pop.gmx.com".into(), "pop.gmx.net".into()],
+            smtp: vec!["mail.gmx.com".into(), "mail.gmx.net".into()],
         }),
-        "zoho.com" => Some(Hosts {
-            imap: vec!["imap.zoho.com".into()],
-            pop3: vec!["pop.zoho.com".into()],
-            smtp: vec!["smtp.zoho.com".into()],
+        "web.de" => Some(Hosts {
+            imap: vec!["imap.web.de".into()],
+            pop3: vec!["pop3.web.de".into()],
+            smtp: vec!["smtp.web.de".into()],
+        }),
+        "zoho.com" | "zoho.eu" => Some(Hosts {
+            imap: vec!["imap.zoho.com".into(), "imap.zoho.eu".into()],
+            pop3: vec!["pop.zoho.com".into(), "pop.zoho.eu".into()],
+            smtp: vec!["smtp.zoho.com".into(), "smtp.zoho.eu".into()],
         }),
         "interia.pl" | "interia.eu" | "poczta.fm" => Some(Hosts {
             imap: vec!["poczta.interia.pl".into()],
             pop3: vec!["poczta.interia.pl".into()],
             smtp: vec!["poczta.interia.pl".into()],
+        }),
+        "wp.pl" | "o2.pl" | "tlen.pl" => Some(Hosts {
+            imap: vec!["poczta.o2.pl".into(), "poczta.wp.pl".into()],
+            pop3: vec!["poczta.o2.pl".into(), "poczta.wp.pl".into()],
+            smtp: vec!["poczta.o2.pl".into(), "poczta.wp.pl".into()],
+        }),
+        "onet.pl" | "op.pl" | "onet.eu" | "spoko.pl" | "amorki.pl" => Some(Hosts {
+            imap: vec!["poczta.onet.pl".into()],
+            pop3: vec!["pop3.poczta.onet.pl".into()],
+            smtp: vec!["smtp.poczta.onet.pl".into()],
+        }),
+        "seznam.cz" | "email.cz" | "post.cz" => Some(Hosts {
+            imap: vec!["imap.seznam.cz".into()],
+            pop3: vec!["pop3.seznam.cz".into()],
+            smtp: vec!["smtp.seznam.cz".into()],
+        }),
+        "ukr.net" => Some(Hosts {
+            imap: vec!["imap.ukr.net".into()],
+            pop3: vec!["pop3.ukr.net".into()],
+            smtp: vec!["smtp.ukr.net".into()],
+        }),
+        "i.ua" => Some(Hosts {
+            imap: vec!["imap.i.ua".into()],
+            pop3: vec!["pop.i.ua".into()],
+            smtp: vec!["smtp.i.ua".into()],
+        }),
+        "t-online.de" => Some(Hosts {
+            imap: vec!["secureimap.t-online.de".into()],
+            pop3: vec!["securepop.t-online.de".into()],
+            smtp: vec!["securesmtp.t-online.de".into()],
+        }),
+        "freenet.de" => Some(Hosts {
+            imap: vec!["mx.freenet.de".into()],
+            pop3: vec!["mx.freenet.de".into()],
+            smtp: vec!["mx.freenet.de".into()],
+        }),
+        "orange.fr" | "wanadoo.fr" => Some(Hosts {
+            imap: vec!["imap.orange.fr".into()],
+            pop3: vec!["pop.orange.fr".into()],
+            smtp: vec!["smtp.orange.fr".into()],
+        }),
+        "free.fr" => Some(Hosts {
+            imap: vec!["imap.free.fr".into()],
+            pop3: vec!["pop.free.fr".into()],
+            smtp: vec!["smtp.free.fr".into()],
+        }),
+        "sfr.fr" | "neuf.fr" => Some(Hosts {
+            imap: vec!["imap.sfr.fr".into()],
+            pop3: vec!["pop.sfr.fr".into()],
+            smtp: vec!["smtp.sfr.fr".into()],
+        }),
+        "laposte.net" => Some(Hosts {
+            imap: vec!["imap.laposte.net".into()],
+            pop3: vec!["pop.laposte.net".into()],
+            smtp: vec!["smtp.laposte.net".into()],
+        }),
+        "libero.it" => Some(Hosts {
+            imap: vec!["imapmail.libero.it".into()],
+            pop3: vec!["popmail.libero.it".into()],
+            smtp: vec!["smtp.libero.it".into()],
+        }),
+        "virgilio.it" => Some(Hosts {
+            imap: vec!["in.virgilio.it".into()],
+            pop3: vec!["in.virgilio.it".into()],
+            smtp: vec!["out.virgilio.it".into()],
+        }),
+        "fastmail.com" | "fastmail.fm" => Some(Hosts {
+            imap: vec!["imap.fastmail.com".into()],
+            pop3: vec!["pop.fastmail.com".into()],
+            smtp: vec!["smtp.fastmail.com".into()],
+        }),
+        "mail.com" | "email.com" | "usa.com" | "post.com" => Some(Hosts {
+            imap: vec!["imap.mail.com".into()],
+            pop3: vec!["pop.mail.com".into()],
+            smtp: vec!["smtp.mail.com".into()],
+        }),
+        "comcast.net" => Some(Hosts {
+            imap: vec!["imap.comcast.net".into()],
+            pop3: vec!["pop3.comcast.net".into()],
+            smtp: vec!["smtp.comcast.net".into()],
+        }),
+        "att.net" | "sbcglobal.net" | "bellsouth.net" => Some(Hosts {
+            imap: vec!["imap.mail.att.net".into()],
+            pop3: vec!["inbound.att.net".into()],
+            smtp: vec!["smtp.mail.att.net".into()],
+        }),
+        "verizon.net" => Some(Hosts {
+            imap: vec!["imap.aol.com".into()],
+            pop3: vec!["pop.verizon.net".into()],
+            smtp: vec!["smtp.verizon.net".into()],
+        }),
+        "cox.net" => Some(Hosts {
+            imap: vec!["imap.cox.net".into()],
+            pop3: vec!["pop.cox.net".into()],
+            smtp: vec!["smtp.cox.net".into()],
+        }),
+        "proton.me" | "protonmail.com" => Some(Hosts {
+            imap: vec!["127.0.0.1".into()],
+            pop3: vec![],
+            smtp: vec!["127.0.0.1".into()],
         }),
         _ => None,
     }
@@ -632,7 +752,7 @@ pub fn discover_hosts(
     }
 
     if use_shared_hosts {
-        if let Some(h) = hosts_api::fetch(domain, Duration::from_millis(600)) {
+        if let Some(h) = hosts_api::fetch(domain, Duration::from_millis(300)) {
             if let Ok(mut c) = cache.lock() {
                 c.insert(domain.to_string(), h.clone());
             }
@@ -641,7 +761,8 @@ pub fn discover_hosts(
     }
 
     if use_auto {
-        if let Some(h) = autoconfig_lookup(domain, auto_timeout) {
+        let fast_to = auto_timeout.min(Duration::from_millis(800));
+        if let Some(h) = autoconfig_lookup(domain, fast_to) {
             if let Ok(mut c) = cache.lock() {
                 c.insert(domain.to_string(), h.clone());
             }
@@ -651,32 +772,24 @@ pub fn discover_hosts(
             return (h, true);
         }
 
-        // Адаптивные эвристики формирования кандидатов
+        // Адаптивные компактные эвристики (самые высоковероятные)
         let mut imap = vec![format!("imap.{domain}"), format!("mail.{domain}")];
-        let pop3 = vec![
-            format!("pop.{domain}"),
-            format!("pop3.{domain}"),
-            format!("mail.{domain}"),
-        ];
+        let pop3 = vec![format!("pop.{domain}"), format!("mail.{domain}")];
         let mut smtp = vec![format!("smtp.{domain}"), format!("mail.{domain}")];
-
-        // Дополнительные глубокие кандидаты
-        imap.push(format!("imap.mail.{domain}"));
-        imap.push(format!("secure.{domain}"));
-        imap.push(format!("mx.{domain}"));
-        imap.push(format!("webmail.{domain}"));
-        smtp.push(format!("smtp.mail.{domain}"));
 
         // Если это поддомен (например, mail.company.com) -> добавляем корневой домен
         let parts: Vec<&str> = domain.split('.').collect();
         if parts.len() > 2 {
             let root = parts[parts.len() - 2..].join(".");
             imap.push(format!("imap.{root}"));
-            imap.push(format!("mail.{root}"));
             smtp.push(format!("smtp.{root}"));
         }
 
-        return (Hosts { imap, pop3, smtp }, true);
+        let hosts = Hosts { imap, pop3, smtp };
+        if let Ok(mut c) = cache.lock() {
+            c.insert(domain.to_string(), hosts.clone());
+        }
+        return (hosts, true);
     }
 
     (hosts_for(domain), false)
@@ -1584,6 +1697,9 @@ pub fn check_account(id: u64, a: &Acct, cfg: &RunCfg) -> Row {
                         if matches!(cat, Cat::Invalid | Cat::TwoFA | Cat::Locked) {
                             stop_proto_hosts = true;
                             learn_and_submit(&domain, proto, host, &hosts, cfg);
+                        } else if matches!(cat, Cat::ServerNf | Cat::Protocol | Cat::Tls) {
+                            // Server not found or unsupported protocol on this host: do not retry this host
+                            stop_proto_hosts = false;
                         }
                         let should_replace = match &best_fail {
                             None => true,
@@ -1592,7 +1708,7 @@ pub fn check_account(id: u64, a: &Acct, cfg: &RunCfg) -> Row {
                         if should_replace {
                             best_fail = Some((cat, proto.clone(), host.clone(), proxy_str, err));
                         }
-                        if stop_proto_hosts {
+                        if stop_proto_hosts || matches!(cat, Cat::ServerNf | Cat::Protocol | Cat::Tls) {
                             break;
                         }
                     }
@@ -1603,7 +1719,6 @@ pub fn check_account(id: u64, a: &Acct, cfg: &RunCfg) -> Row {
             }
         }
     }
-
     if let Some((cat, proto, host, proxy_str, err)) = best_fail {
         Row {
             id,
@@ -1821,7 +1936,7 @@ fn run_check(
             }
         });
 
-        let threads_count = cfg.threads.clamp(1, 500).min(total.max(1));
+        let threads_count = cfg.threads.clamp(1, 1000).min(total.max(1));
         let mut handles = Vec::new();
 
         for _ in 0..threads_count {
@@ -2021,7 +2136,7 @@ fn handle_ipc(body: String, proxy: EventLoopProxy<UserEvent>) {
             let threads = if msg.threads == 0 {
                 200
             } else {
-                msg.threads.clamp(1, 500)
+                msg.threads.clamp(1, 1000)
             } as usize;
             let timeout_secs = if msg.timeout == 0 {
                 10
