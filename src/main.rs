@@ -1481,6 +1481,54 @@ pub fn parse_accounts(raw: &str) -> Vec<Acct> {
         .collect()
 }
 
+pub fn load_accounts_from_path_or_str(path: &str, raw: &str) -> Vec<Acct> {
+    if !path.trim().is_empty() {
+        if let Ok(file) = std::fs::File::open(path) {
+            use std::io::BufRead;
+            let reader = std::io::BufReader::with_capacity(1024 * 1024, file);
+            let mut accts = Vec::with_capacity(65536);
+            for line in reader.lines().flatten() {
+                let l = line.trim();
+                if l.is_empty() || l.starts_with('#') {
+                    continue;
+                }
+                if let Some((u, p)) = l.split_once(':') {
+                    let (u, p) = (u.trim(), p.trim());
+                    if !u.is_empty() && !p.is_empty() {
+                        accts.push(Acct {
+                            login: u.to_string(),
+                            pass: p.to_string(),
+                        });
+                    }
+                }
+            }
+            if !accts.is_empty() {
+                return accts;
+            }
+        }
+    }
+    parse_accounts(raw)
+}
+
+pub fn load_proxies_from_path_or_str(path: &str, raw: &str, default: ProxyKind) -> Vec<Proxy> {
+    if !path.trim().is_empty() {
+        if let Ok(file) = std::fs::File::open(path) {
+            use std::io::BufRead;
+            let reader = std::io::BufReader::with_capacity(512 * 1024, file);
+            let mut list = Vec::new();
+            for line in reader.lines().flatten() {
+                if let Some(p) = parse_proxy(&line, default) {
+                    list.push(p);
+                }
+            }
+            if !list.is_empty() {
+                return list;
+            }
+        }
+    }
+    parse_proxies(raw, default)
+}
+
 #[derive(Clone, Debug)]
 pub struct RunCfg {
     pub threads: usize,
@@ -2037,9 +2085,12 @@ struct In {
     cmd: String,
     #[serde(default)]
     creds: String,
+    #[serde(default, alias = "creds_path")]
+    creds_path: String,
     #[serde(default)]
     proxies: String,
-    #[serde(default = "default_imap_port", alias = "port_imap")]
+    #[serde(default, alias = "proxies_path")]
+    proxies_path: String,
     port_imap: u16,
     #[serde(default = "default_pop3_port", alias = "port_pop3")]
     port_pop3: u16,
@@ -2119,7 +2170,7 @@ fn handle_ipc(body: String, proxy: EventLoopProxy<UserEvent>) {
             let run_id = RUN_ID.fetch_add(1, Ordering::SeqCst) + 1;
             BUSY.store(true, Ordering::SeqCst);
 
-            let accounts = parse_accounts(&msg.creds);
+            let accounts = load_accounts_from_path_or_str(&msg.creds_path, &msg.creds);
             if accounts.is_empty() {
                 BUSY.store(false, Ordering::SeqCst);
                 let _ = proxy.send_event(UserEvent::Eval("window.finish();".into()));
@@ -2131,8 +2182,7 @@ fn handle_ipc(body: String, proxy: EventLoopProxy<UserEvent>) {
                 "https" => ProxyKind::Https,
                 _ => ProxyKind::Socks5,
             };
-            let parsed_proxies = parse_proxies(&msg.proxies, default_kind);
-
+            let parsed_proxies = load_proxies_from_path_or_str(&msg.proxies_path, &msg.proxies, default_kind);
             let threads = if msg.threads == 0 {
                 200
             } else {
@@ -2182,7 +2232,6 @@ fn handle_ipc(body: String, proxy: EventLoopProxy<UserEvent>) {
                 auto_cache: AUTO_CACHE.clone(),
                 use_shared_hosts: msg.use_shared_hosts,
             };
-
             let dir_name = if msg.out_dir.trim().is_empty() {
                 "results".to_string()
             } else {
@@ -2209,6 +2258,64 @@ fn handle_ipc(body: String, proxy: EventLoopProxy<UserEvent>) {
             };
 
             run_check(run_id, accounts, cfg, out_arc, proxy);
+        }
+        "pick_creds" => {
+            let proxy = proxy.clone();
+            std::thread::spawn(move || {
+                if let Some(file) = rfd::FileDialog::new()
+                    .add_filter("Text files", &["txt", "csv", "log"])
+                    .pick_file()
+                {
+                    let path_str = file.to_string_lossy().to_string();
+                    let file_name = file.file_name().and_then(|n| n.to_str()).unwrap_or("creds.txt");
+                    let escaped_path = path_str.replace('\\', "/").replace('"', "\\\"");
+                    let escaped_name = file_name.replace('"', "\\\"");
+
+                    // Count lines quickly
+                    let count = if let Ok(f) = std::fs::File::open(&file) {
+                        use std::io::BufRead;
+                        let reader = std::io::BufReader::with_capacity(1024 * 1024, f);
+                        reader.lines().flatten().filter(|l| {
+                            let t = l.trim();
+                            !t.is_empty() && !t.starts_with('#') && t.contains(':')
+                        }).count()
+                    } else {
+                        0
+                    };
+
+                    let js = format!("if(typeof window.onCredsFileSelected==='function')window.onCredsFileSelected(\"{escaped_path}\", \"{escaped_name}\", {count});");
+                    let _ = proxy.send_event(UserEvent::Eval(js));
+                }
+            });
+        }
+        "pick_proxies" => {
+            let proxy = proxy.clone();
+            std::thread::spawn(move || {
+                if let Some(file) = rfd::FileDialog::new()
+                    .add_filter("Text files", &["txt", "csv", "log"])
+                    .pick_file()
+                {
+                    let path_str = file.to_string_lossy().to_string();
+                    let file_name = file.file_name().and_then(|n| n.to_str()).unwrap_or("proxies.txt");
+                    let escaped_path = path_str.replace('\\', "/").replace('"', "\\\"");
+                    let escaped_name = file_name.replace('"', "\\\"");
+
+                    // Count lines quickly
+                    let count = if let Ok(f) = std::fs::File::open(&file) {
+                        use std::io::BufRead;
+                        let reader = std::io::BufReader::with_capacity(512 * 1024, f);
+                        reader.lines().flatten().filter(|l| {
+                            let t = l.trim();
+                            !t.is_empty() && !t.starts_with('#')
+                        }).count()
+                    } else {
+                        0
+                    };
+
+                    let js = format!("if(typeof window.onProxiesFileSelected==='function')window.onProxiesFileSelected(\"{escaped_path}\", \"{escaped_name}\", {count});");
+                    let _ = proxy.send_event(UserEvent::Eval(js));
+                }
+            });
         }
         "pause" => {
             PAUSED.store(true, Ordering::SeqCst);

@@ -1687,7 +1687,11 @@
 
 <script>
   let credsRaw = "";
+  let credsPath = "";
   let proxiesRaw = "";
+  let proxiesPath = "";
+  let credsCount = 0;
+  let proxiesCount = 0;
   let credsMap = new Map(); // login -> pass
   let allRows = []; // { id, elem, login, category, found, corporate, protocol, country, auto }
   let successAccounts = []; // array of { id, login, count, protocol }
@@ -2015,15 +2019,31 @@
       el.addEventListener('change', saveSettings);
     }
   });
-  const fileCredsInp = document.getElementById('file-creds');
-  const fileProxiesInp = document.getElementById('file-proxies');
+  window.onCredsFileSelected = function(filePath, fileName, count) {
+    credsPath = filePath;
+    credsRaw = "";
+    credsCount = count;
+    document.getElementById('badge-creds').textContent = count;
+  };
 
-  document.getElementById('btn-load-creds').addEventListener('click', () => fileCredsInp.click());
-  document.getElementById('btn-load-proxies').addEventListener('click', () => fileProxiesInp.click());
+  window.onProxiesFileSelected = function(filePath, fileName, count) {
+    proxiesPath = filePath;
+    proxiesRaw = "";
+    proxiesCount = count;
+    document.getElementById('badge-proxies').textContent = count;
+  };
+
+  document.getElementById('btn-load-creds').addEventListener('click', () => {
+    sendIPC({ cmd: 'pick_creds' });
+  });
+  document.getElementById('btn-load-proxies').addEventListener('click', () => {
+    sendIPC({ cmd: 'pick_proxies' });
+  });
 
   fileCredsInp.addEventListener('change', (e) => {
     const f = e.target.files[0];
     if (!f) return;
+    credsPath = "";
     const r = new FileReader();
     r.onload = (ev) => {
       credsRaw = ev.target.result || "";
@@ -2042,6 +2062,7 @@
           }
         }
       }
+      credsCount = count;
       document.getElementById('badge-creds').textContent = count;
     };
     r.readAsText(f);
@@ -2050,6 +2071,7 @@
   fileProxiesInp.addEventListener('change', (e) => {
     const f = e.target.files[0];
     if (!f) return;
+    proxiesPath = "";
     const r = new FileReader();
     r.onload = (ev) => {
       proxiesRaw = ev.target.result || "";
@@ -2058,6 +2080,7 @@
         const trimmed = line.trim();
         if (trimmed && !trimmed.startsWith('#')) count++;
       }
+      proxiesCount = count;
       document.getElementById('badge-proxies').textContent = count;
     };
     r.readAsText(f);
@@ -2092,7 +2115,7 @@
       openEppModal();
       return;
     }
-    if (!credsRaw.trim()) {
+    if (!credsPath && !credsRaw.trim()) {
       alert("Пожалуйста, выберите файл с аккаунтами (Учётки)!");
       return;
     }
@@ -2139,7 +2162,9 @@
     sendIPC({
       cmd: 'start',
       creds: credsRaw,
+      creds_path: credsPath,
       proxies: proxiesRaw,
+      proxies_path: proxiesPath,
       useProxies,
       proxyType,
       protocols,
